@@ -193,6 +193,11 @@ def commit_job(job: ImportJob) -> ImportJob:
     district = job.district
     if job.import_type == "schools":
         _commit_schools(district, rows, mapping)
+        # Relocate a placeholder/misplaced depot onto the imported service area
+        # so generated routes don't start with a cross-state straight line.
+        from apps.districts.services import snap_depot_to_service_area
+
+        snap_depot_to_service_area(district)
     elif job.import_type == "students":
         _commit_students(district, rows, mapping)
     elif job.import_type == "drivers":

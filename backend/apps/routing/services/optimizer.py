@@ -121,6 +121,13 @@ def generate_plan(plan: RoutePlan, vehicle_ids=None, driver_ids=None, weights=No
             "Select a school before generating routes.",
             details={"reasons": ["A school is required for morning route generation."]},
         )
+    # A district's placeholder depot (created at signup) can sit hundreds of
+    # miles from an imported roster, which makes every route start with a long
+    # straight-line leg the street router can't follow. Snap a misplaced depot
+    # onto the roster's service area before solving.
+    from apps.districts.services import snap_depot_to_service_area
+
+    snap_depot_to_service_area(district)
     depot = Depot.objects.filter(district=district, is_active=True).order_by("name").first()
     if depot is None:
         raise InfeasibleRouteError("No depot is configured.", details={"reasons": ["No depot is configured."]})
