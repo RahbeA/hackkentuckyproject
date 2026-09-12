@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRightLeft, CheckCircle2, Construction, Loader2, Map, Route, ShieldAlert } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, Construction, Loader2, Map, Route, ShieldAlert, Trash2 } from "lucide-react";
 import { api, errorMessage } from "../api/client";
 import { PlanGeneratingScreen } from "../components/brand/PlanGeneratingScreen";
 import { MapPoint, RouteMap } from "../components/maps/RouteMap";
@@ -107,6 +107,14 @@ export function PlannerPage() {
   const approve = useMutation({
     mutationFn: async () => api.post(`/route-plans/${planId}/approve/`),
     onSuccess: () => refetch(),
+  });
+  const deleteRoute = useMutation({
+    mutationFn: async (id: string) => api.delete(`/routes/${id}/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["plans"] });
+      refetch();
+    },
+    onError: (e) => setErr(errorMessage(e)),
   });
 
   const routes = plan?.routes || [];
@@ -316,9 +324,28 @@ export function PlannerPage() {
                       {r.is_feeder && <span className="badge-info">Feeder</span>}
                       {r.transfers_in.length > 0 && <span className="badge-info">Trunk</span>}
                     </div>
-                    <span className="badge-neutral">
-                      {r.student_count} students · {(r.on_time_probability * 100).toFixed(0)}% on-time
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="badge-neutral">
+                        {r.student_count} students · {(r.on_time_probability * 100).toFixed(0)}% on-time
+                      </span>
+                      <button
+                        className="btn-ghost !px-2 !py-1 text-bad hover:bg-red-50"
+                        title={`Delete route ${r.route_code}`}
+                        aria-label={`Delete route ${r.route_code}`}
+                        disabled={deleteRoute.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Delete route ${r.route_code}? This removes its stops, rider assignments, and any trips. This cannot be undone.`)) {
+                            deleteRoute.mutate(r.id);
+                          }
+                        }}
+                      >
+                        {deleteRoute.isPending && deleteRoute.variables === r.id ? (
+                          <Loader2 size={15} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={15} />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {r.transfers_out.map((t) => (

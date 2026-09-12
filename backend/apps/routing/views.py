@@ -280,6 +280,25 @@ class RoutePlanViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         return Response({"alerts_created": len(created), "routes": created})
 
 
+class RouteViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
+    """Read + delete individual routes. Deleting cascades its stops, rider
+    assignments, transfers, and any materialized trips (all on_delete=CASCADE)."""
+
+    serializer_class = RouteSerializer
+    tenant_field = "route_plan__district_id"
+    http_method_names = ["get", "delete", "head", "options"]
+    queryset = Route.objects.select_related("school", "assigned_vehicle", "assigned_driver__user").prefetch_related(
+        "stops", "transfers_out__depot", "transfers_in__depot"
+    )
+    permission_classes = [IsAuthenticated, HasRole]
+    allowed_roles = (
+        UserRole.PLATFORM_ADMIN,
+        UserRole.DISTRICT_ADMIN,
+        UserRole.PLANNER,
+    )
+    filterset_fields = ("route_plan", "school")
+
+
 class JobViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = JobSerializer
     queryset = BackgroundJob.objects.all()
