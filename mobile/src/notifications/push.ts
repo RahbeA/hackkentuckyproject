@@ -11,7 +11,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export type DartNoticeKind = "delay" | "eta" | "school" | "demo";
+export type DartNoticeKind = "delay" | "eta" | "school" | "emergency" | "demo";
 
 export async function ensureNotificationSetup() {
   if (Platform.OS === "android") {

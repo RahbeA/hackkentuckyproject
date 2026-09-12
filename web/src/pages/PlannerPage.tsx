@@ -146,7 +146,7 @@ export function PlannerPage() {
       />
       <PageHeader
         title="Route planner"
-        subtitle="Pick the school that has students, generate, approve, then publish trips. Ignore the old failed plans."
+        subtitle="A published reliability plan should already be selected. Optional: pick Fastest and Generate. Ignore failed plans."
         actions={
           plan && (
             <span className={STATUS_BADGE[plan.status] || "badge-neutral"}>{plan.status}</span>

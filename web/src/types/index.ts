@@ -46,7 +46,7 @@ export const WORKSPACE_HOME: Record<WorkspaceId, string> = {
 
 export function afterSignInPath(role: Role, opts?: { pickWorkspace?: boolean; newDistrict?: boolean }): string {
   if (opts?.newDistrict && role === "district_admin") return "/app/onboarding";
-  if (opts?.pickWorkspace && (role === "district_admin" || role === "platform_admin")) {
+  if (opts?.pickWorkspace && role === "district_admin") {
     return "/choose-workspace";
   }
   return ROLE_HOME[role];

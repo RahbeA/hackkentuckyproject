@@ -5,10 +5,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiError } from "../src/api/client";
 import { useAuth, homeFor } from "../src/auth/AuthProvider";
 import { DartMark } from "../src/components/brand/DartLogo";
+import { ApiBanner } from "../src/components/ui/ApiBanner";
+import { BackButton } from "../src/components/ui/BackButton";
 import { Button } from "../src/components/ui/Button";
+import { DEMO_MODE as DEMO } from "../src/config";
 import { colors, fonts } from "../src/theme";
-
-const DEMO = process.env.EXPO_PUBLIC_DEMO_MODE === "true";
 
 export default function Login() {
   const router = useRouter();
@@ -39,19 +40,46 @@ export default function Login() {
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
-          paddingTop: insets.top + 36,
+          paddingTop: insets.top + 16,
           paddingHorizontal: 22,
           paddingBottom: insets.bottom + 24,
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <DartMark size={44} />
+        <BackButton />
+        <View style={{ marginTop: 20 }}>
+          <DartMark size={44} />
+        </View>
         <Text style={{ fontFamily: fonts.heading, fontSize: 30, letterSpacing: -0.8, lineHeight: 34, marginTop: 26, color: colors.ink }}>
           Follow your rider's morning
         </Text>
         <Text style={{ marginTop: 10, fontSize: 15, lineHeight: 24, color: colors.muted }}>
-          Sign in with the email your district has on file.
+          Families and drivers use this app. The 6-step walkthrough lives on the web console — tap a demo account
+          below if you are judging the mobile side.
         </Text>
+
+        {DEMO ? (
+          <View style={{ marginTop: 24, gap: 8 }}>
+            <Text style={{ fontSize: 11.5, fontWeight: "700", letterSpacing: 0.7, textTransform: "uppercase", color: colors.faint }}>
+              Judges — tap one
+            </Text>
+            <Button
+              variant="secondary"
+              label="Family · Ava Bennett only"
+              onPress={() => submit("guardian@jefferson.demo", "DemoPass123!")}
+            />
+            <Button
+              variant="secondary"
+              label="Student · same privacy rules"
+              onPress={() => submit("student@jefferson.demo", "DemoPass123!")}
+            />
+            <Button
+              variant="secondary"
+              label="Driver · assigned run"
+              onPress={() => submit("driver@jefferson.demo", "DemoPass123!")}
+            />
+          </View>
+        ) : null}
 
         <View style={{ marginTop: 30, gap: 16 }}>
           <Field label="Email">
@@ -95,40 +123,22 @@ export default function Login() {
           </Pressable>
         </View>
 
-        {DEMO ? (
-          <View style={{ marginTop: 20, gap: 8 }}>
-            <Text style={{ fontSize: 11.5, fontWeight: "700", letterSpacing: 0.7, textTransform: "uppercase", color: colors.faint }}>
-              Demo accounts
-            </Text>
-            <Button
-              variant="secondary"
-              label="Guardian · guardian@jefferson.demo"
-              onPress={() => submit("guardian@jefferson.demo", "DemoPass123!")}
-            />
-            <Button
-              variant="secondary"
-              label="Student · student@jefferson.demo"
-              onPress={() => submit("student@jefferson.demo", "DemoPass123!")}
-            />
-          </View>
-        ) : null}
-
         <View
           style={{
             marginTop: "auto",
             paddingTop: 28,
-            flexDirection: "row",
-            gap: 11,
             borderWidth: 1,
             borderColor: colors.border,
             backgroundColor: colors.field,
             borderRadius: 10,
             padding: 14,
+            gap: 8,
           }}
         >
-          <Text style={{ fontSize: 12.5, lineHeight: 20, color: colors.muted, flex: 1 }}>
+          <Text style={{ fontSize: 12.5, lineHeight: 20, color: colors.muted }}>
             You will only ever see the riders linked to your account. Bus locations in this demo are simulated.
           </Text>
+          <ApiBanner />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

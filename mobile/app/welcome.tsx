@@ -2,7 +2,8 @@ import { useRouter } from "expo-router";
 import { Image, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteSketch } from "../src/components/brand/RouteSketch";
-import { colors, fonts, shadow } from "../src/theme";
+import { ApiBanner } from "../src/components/ui/ApiBanner";
+import { colors, shadow, uiFont } from "../src/theme";
 
 const wordmark = require("../assets/brand/dart-logo.png");
 
@@ -36,11 +37,11 @@ export default function Welcome() {
                 elevation: 3,
               }}
             >
-              <Text style={{ fontFamily: fonts.heading, fontSize: 22, letterSpacing: -0.6, color: colors.ink }}>7:42</Text>
+              <Text style={{ ...uiFont, fontSize: 22, fontWeight: "700", color: colors.ink }}>7:42</Text>
               <View style={{ width: 1, height: 28, backgroundColor: colors.border }} />
               <View>
-                <Text style={{ fontSize: 13, fontWeight: "600", color: colors.ink }}>Maple & 3rd</Text>
-                <Text style={{ marginTop: 2, fontSize: 12, color: colors.muted }}>Ava · Bus 14</Text>
+                <Text style={{ ...uiFont, fontSize: 13, fontWeight: "600", color: colors.ink }}>Maple & 3rd</Text>
+                <Text style={{ ...uiFont, marginTop: 2, fontSize: 12, color: colors.muted }}>Ava · Bus 14</Text>
               </View>
             </View>
           </View>
@@ -49,16 +50,17 @@ export default function Welcome() {
         <View style={{ paddingHorizontal: 26, paddingTop: 22 }}>
           <Text
             style={{
-              fontFamily: fonts.heading,
+              ...uiFont,
               fontSize: 34,
-              letterSpacing: -1.1,
-              lineHeight: 38,
+              fontWeight: "700",
+              letterSpacing: -0.4,
+              lineHeight: 40,
               color: colors.ink,
             }}
           >
             Know where the bus is.
           </Text>
-          <Text style={{ marginTop: 12, fontSize: 16, lineHeight: 24, color: colors.muted }}>
+          <Text style={{ ...uiFont, marginTop: 12, fontSize: 16, lineHeight: 24, color: colors.muted }}>
             Arrival estimates for your own riders, and a notice the moment a route changes.
           </Text>
         </View>
@@ -74,10 +76,10 @@ export default function Welcome() {
               justifyContent: "center",
             }}
           >
-            <Text style={{ color: colors.white, fontSize: 16, fontWeight: "600" }}>Sign in</Text>
+            <Text style={{ ...uiFont, color: colors.white, fontSize: 16, fontWeight: "600" }}>Sign in</Text>
           </Pressable>
           <Pressable
-            onPress={() => router.push("/login?next=link")}
+            onPress={() => router.push("/register")}
             style={{
               backgroundColor: colors.white,
               borderWidth: 1,
@@ -88,12 +90,15 @@ export default function Welcome() {
               justifyContent: "center",
             }}
           >
-            <Text style={{ color: colors.ink, fontSize: 16, fontWeight: "600" }}>I have a rider code</Text>
+            <Text style={{ ...uiFont, color: colors.ink, fontSize: 16, fontWeight: "600" }}>Create family account</Text>
           </Pressable>
-          <Text style={{ marginTop: 8, textAlign: "center", fontSize: 12, lineHeight: 18, color: colors.faint }}>
-            Parents and drivers sign in here. Planners, dispatchers, and admins use the web console. Locations are
-            simulated.
+          <Pressable onPress={() => router.push("/login?next=link")} style={{ minHeight: 44, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ ...uiFont, color: colors.primary, fontSize: 15, fontWeight: "600" }}>I have a rider code</Text>
+          </Pressable>
+          <Text style={{ ...uiFont, marginTop: 4, textAlign: "center", fontSize: 12, lineHeight: 18, color: colors.faint }}>
+            Families and drivers sign in here. Planners use the web console.
           </Text>
+          <ApiBanner />
         </View>
       </View>
     </View>

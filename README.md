@@ -1,6 +1,10 @@
-# RouteWise
+# DART (District Automated Routing & Tracking)
 
-RouteWise is a **proof-of-concept** multi-tenant school transportation platform. Districts can import fictional transportation records, generate bus routes with OR-Tools, compare fastest vs reliability plans, stress-test mornings with a Monte Carlo digital twin, watch simulated GPS, and show families a private ETA.
+Hackathon judges: open the web app → **Start guided demo** → **Start walkthrough**. Jefferson Demo Schools is already seeded. Follow the blue coach (about 6 minutes). Password for every demo account is `DemoPass123!`. Full script: [docs/demo.md](docs/demo.md).
+
+---
+
+DART is a **proof-of-concept** multi-tenant school transportation platform. Districts can import fictional transportation records, generate bus routes with OR-Tools, compare fastest vs reliability plans, stress-test mornings with a Monte Carlo digital twin, watch simulated GPS, and show families a private ETA.
 
 **This is not a production-ready student transportation system.** It is not certified for school-bus navigation, student privacy compliance (FERPA/COPPA), or operational dispatch. Demo students, GPS, and ML labels are synthetic.
 

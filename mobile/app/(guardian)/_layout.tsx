@@ -15,7 +15,8 @@ export default function GuardianTabs() {
     );
   }
   if (!user) return <Redirect href="/welcome" />;
-  if (user.role !== "guardian") return <Redirect href="/driver" />;
+  if (user.role === "driver") return <Redirect href="/driver" />;
+  if (user.role !== "guardian") return <Redirect href="/staff" />;
 
   return (
     <>

@@ -101,12 +101,65 @@ def test_invalid_alert_type_rejected(district, school, depot, dispatcher):
     assert res.status_code == 400
 
 
-def test_driver_cannot_send_guardian_alert(district, school, depot, driver_user):
-    trip = _trip(district, school, depot, driver=driver_user.driver_profile)
+def test_driver_on_own_trip_accident_notifies_guardian(
+    district, school, depot, driver_user, linked_guardian, student
+):
+    trip = _trip(district, school, depot, student=student, driver=driver_user.driver_profile)
     res = api(driver_user).post(
+        f"/api/v1/trips/{trip.id}/alert-guardians/",
+        {"alert_type": "accident", "message": "Collision at 3rd and Oak. Everyone is safe."},
+        format="json",
+    )
+    assert res.status_code == 201, res.data
+    assert res.data["guardians_notified"] == 1
+    incident = Incident.objects.get(id=res.data["incident_id"])
+    assert incident.type == Incident.Type.ACCIDENT
+    assert incident.created_by_id == driver_user.id
+    note = Notification.objects.get(user=linked_guardian)
+    assert note.event_type == "alert.guardian"
+    assert "Collision" in note.body
+
+
+def test_driver_cannot_alert_someone_elses_trip(district, school, depot, driver_user):
+    from django.contrib.auth import get_user_model
+
+    from apps.accounts.models import UserRole
+    from apps.transportation.models import DriverProfile
+
+    other = get_user_model().objects.create_user(
+        email="driver2@jefferson.demo",
+        password="DemoPass123!",
+        first_name="Other",
+        last_name="Driver",
+        role=UserRole.DRIVER,
+        district=district,
+    )
+    DriverProfile.objects.create(user=other, district=district, employee_id="D-2002")
+    trip = _trip(district, school, depot, driver=driver_user.driver_profile)
+    res = api(other).post(
         f"/api/v1/trips/{trip.id}/alert-guardians/", {"alert_type": "accident"}, format="json"
     )
-    assert res.status_code == 403
+    assert res.status_code in (403, 404)
+    assert not Notification.objects.filter(event_type="alert.guardian").exists()
+
+
+def test_driver_behavior_incident_does_not_notify_guardians(
+    district, school, depot, driver_user, linked_guardian, student
+):
+    trip = _trip(district, school, depot, student=student, driver=driver_user.driver_profile)
+    res = api(driver_user).post(
+        "/api/v1/incidents/",
+        {
+            "trip": str(trip.id),
+            "type": "behavior",
+            "severity": "medium",
+            "description": "Student issue on board.",
+        },
+        format="json",
+    )
+    assert res.status_code == 201, res.data
+    assert Incident.objects.filter(trip=trip, type=Incident.Type.BEHAVIOR).exists()
+    assert not Notification.objects.filter(user=linked_guardian).exists()
 
 
 def test_guardian_cannot_send_guardian_alert(district, school, depot, linked_guardian, student):

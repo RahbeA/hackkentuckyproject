@@ -15,10 +15,13 @@ class UserRole(models.TextChoices):
 
 
 class UserManager(BaseUserManager):
+    def get_by_natural_key(self, username):
+        return self.get(email__iexact=username)
+
     def create_user(self, email, password=None, **extra):
         if not email:
             raise ValueError("Email is required")
-        email = self.normalize_email(email)
+        email = self.normalize_email(email).strip().lower()
         user = self.model(email=email, **extra)
         user.set_password(password)
         user.save(using=self._db)

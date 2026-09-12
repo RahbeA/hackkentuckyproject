@@ -77,12 +77,33 @@ export function useHistory() {
   });
 }
 
+export function useAbsentToday() {
+  return useQuery<string[]>({
+    queryKey: ["absent-today"],
+    queryFn: async () => [],
+    initialData: [],
+    staleTime: Infinity,
+  });
+}
+
 export function useMarkAbsent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (vars: { student_id: string; note?: string; scope?: "am" | "all" }) =>
       api.post("/guardian/absent/", vars),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["etas"] }),
+    onSuccess: (_data, vars) => {
+      qc.setQueryData<string[]>(["absent-today"], (prev = []) => [...new Set([...prev, vars.student_id])]);
+      qc.invalidateQueries({ queryKey: ["etas"] });
+    },
+  });
+}
+
+export function useDemoStatus(districtId?: string | null) {
+  return useQuery<{ running: boolean; progress: number; trip_ids: string[]; hero_id: string | null }>({
+    queryKey: ["demo-status", districtId],
+    enabled: Boolean(districtId),
+    queryFn: async () => (await api.get(`/districts/${districtId}/demo/status/`)).data,
+    refetchInterval: 3000,
   });
 }
 

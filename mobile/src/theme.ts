@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 // DART brand tokens — derived from the design (Auth screens setup).
 export const colors = {
   primary: "#2563EB",
@@ -27,6 +29,16 @@ export const fonts = {
   heading: "SpaceGrotesk_700Bold",
   headingMed: "SpaceGrotesk_500Medium",
 } as const;
+
+/**
+ * Body/UI type. Loading only Bold/Medium Space Grotesk makes iOS steal those
+ * faces for fontWeight 600 and render spaces at zero width ("Sign in" → "Signin").
+ */
+export const uiFont = Platform.select({
+  ios: { fontFamily: "Avenir Next" },
+  android: { fontFamily: "sans-serif" },
+  default: {},
+});
 
 export const radius = { sm: 8, md: 10, lg: 12, xl: 14, pill: 999 } as const;
 

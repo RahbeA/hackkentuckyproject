@@ -35,3 +35,5 @@ Parents are not a CSV. They join the district, then claim a rider code from Stud
 Happy-path rider codes: AVA001, LEO002, MIA003, NOA004, KAI010.
 
 Then: planner generate → approve → publish → Start live demo.
+
+On a physical phone next to the web console, set `EXPO_PUBLIC_API_URL=http://<your-lan-ip>:8000/api/v1` and `EXPO_PUBLIC_WS_URL=ws://<your-lan-ip>:8000/ws` so the app is not pointed at localhost or Railway.

@@ -1,187 +1,198 @@
 import { useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import { Pressable, Text, TextInput, View } from "react-native";
 import { api } from "../../src/api/client";
-import { useDistrictLive } from "../../src/live/DistrictLiveProvider";
+import { useDemoStatus } from "../../src/api/hooks";
+import { useAuth } from "../../src/auth/AuthProvider";
+import { GuidanceSheet } from "../../src/components/drive/GuidanceSheet";
+import { LiveMap } from "../../src/components/track/LiveMap";
 import { ScreenHeader } from "../../src/components/ui/ScreenHeader";
-import { colors } from "../../src/theme";
+import { Chip } from "../../src/components/ui/Chip";
+import { useDistrictLive } from "../../src/live/DistrictLiveProvider";
+import { colors, uiFont } from "../../src/theme";
+
+type Stop = { id: string; name: string; kind?: string; sequence: number; latitude: string; longitude: string };
+type ManifestStop = { stop_id: string; stop_name: string; students: { id: string; first_name: string; last_name: string }[] };
 
 export default function DriverTrip() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const tripId = String(id || "");
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const { positions } = useDistrictLive();
+  const { data: demo } = useDemoStatus(user?.district);
+  const socket = positions[tripId];
+  const demoListsThisTrip = Boolean(demo?.running && (demo.trip_ids || []).includes(tripId));
+  const live = Boolean(socket || demoListsThisTrip);
+
   const { data: trip } = useQuery({
-    queryKey: ["trip", id],
-    queryFn: async () => (await api.get(`/trips/${id}/`)).data,
+    queryKey: ["trip", tripId],
+    enabled: Boolean(tripId),
+    queryFn: async () => (await api.get(`/trips/${tripId}/`)).data,
     refetchInterval: 4000,
   });
   const { data: manifest } = useQuery({
-    queryKey: ["manifest", id],
-    queryFn: async () => (await api.get(`/trips/${id}/manifest/`)).data,
+    queryKey: ["manifest", tripId],
+    enabled: Boolean(tripId),
+    queryFn: async () => (await api.get(`/trips/${tripId}/manifest/`)).data as ManifestStop[],
   });
-  const act = (path: string, body: object = {}) =>
-    api.post(`/trips/${id}/${path}`, body).then(() => qc.invalidateQueries({ queryKey: ["trip", id] }));
 
-  const [sim, setSim] = useState(false);
+  const act = (path: string, body: object = {}) =>
+    api.post(`/trips/${tripId}/${path}`, body).then(() => qc.invalidateQueries({ queryKey: ["trip", tripId] }));
+
+  const [practice, setPractice] = useState(false);
   const tRef = useRef(0);
-  const simStep = async (t: number) => {
-    tRef.current = t;
-    await api.post(`/trips/${id}/simulate-step/`, { t });
-    qc.invalidateQueries({ queryKey: ["trip", id] });
-  };
-  const startDrive = async () => {
-    try {
-      await act("start/");
-    } catch {
-      // Trip may already be active — still run the demo simulation.
-    }
-    await simStep(0.01);
-    setSim(true);
-  };
   useEffect(() => {
-    if (!sim) return;
+    if (!practice || live) return;
     const handle = setInterval(async () => {
       const next = Math.min(0.98, tRef.current + 0.04);
+      tRef.current = next;
       if (next >= 0.98) {
-        setSim(false);
+        setPractice(false);
         return;
       }
-      await simStep(next);
+      await api.post(`/trips/${tripId}/simulate-step/`, { t: next });
+      qc.invalidateQueries({ queryKey: ["trip", tripId] });
     }, 2200);
     return () => clearInterval(handle);
-  }, [sim, id, qc]);
+  }, [practice, live, tripId, qc]);
 
+  useEffect(() => {
+    if (live && practice) setPractice(false);
+  }, [live, practice]);
+
+  const [incidentOpen, setIncidentOpen] = useState(false);
   const [incident, setIncident] = useState("");
   const report = useMutation({
-    mutationFn: () => api.post("/incidents/", { trip: id, type: "other", severity: "medium", description: incident || "Driver report" }),
+    mutationFn: () =>
+      api.post("/incidents/", { trip: tripId, type: "other", severity: "medium", description: incident || "Driver report" }),
+    onSuccess: () => {
+      setIncident("");
+      setIncidentOpen(false);
+    },
   });
 
-  const { positions } = useDistrictLive();
-  const live = id ? positions[String(id)] : undefined;
-  const stops = trip?.stops || [];
-  const pos = trip?.last_position;
+  const stops: Stop[] = trip?.stops || [];
+  const path = (trip?.path || []).map(([lng, lat]: [number, number]) => ({ latitude: lat, longitude: lng }));
+  const mappedStops = stops.map((s) => ({
+    ...s,
+    latitude: Number(s.latitude),
+    longitude: Number(s.longitude),
+  }));
+  const bus =
+    socket
+      ? { latitude: socket.lat, longitude: socket.lng }
+      : trip?.last_position
+        ? { latitude: Number(trip.last_position.latitude), longitude: Number(trip.last_position.longitude) }
+        : null;
+  const heading = socket?.heading ?? Number(trip?.last_position?.heading || 0);
   const g = trip?.guidance;
-  const coords = useMemo(() => {
-    const path = trip?.path || [];
-    if (path.length > 1) {
-      return path.map((c: [number, number]) => ({ longitude: c[0], latitude: c[1] }));
-    }
-    return stops.map((s: { latitude: string; longitude: string }) => ({
-      latitude: Number(s.latitude),
-      longitude: Number(s.longitude),
-    }));
-  }, [trip?.path, stops]);
-  const bus = live
-    ? { latitude: live.lat, longitude: live.lng }
-    : pos
-      ? { latitude: Number(pos.latitude), longitude: Number(pos.longitude) }
-      : coords[0];
+  const nextName = socket?.nextStopName || g?.next_stop_name;
+  const nextStop = useMemo(() => {
+    if (g?.next_stop_id) return stops.find((s) => s.id === g.next_stop_id);
+    if (nextName) return stops.find((s) => s.name === nextName);
+    const seq = socket?.currentStopSequence ?? trip?.current_stop_sequence ?? 0;
+    return stops.find((s) => s.sequence > seq && s.kind !== "depot") || stops.find((s) => s.kind === "school");
+  }, [g?.next_stop_id, nextName, stops, socket?.currentStopSequence, trip?.current_stop_sequence]);
+  const ridersHere = (manifest || []).find((m) => m.stop_id === nextStop?.id)?.students.map((s) => s.first_name) || [];
+  const delay = socket?.delaySeconds ?? trip?.current_delay_seconds ?? 0;
+  const lateMinutes = delay >= 180 ? Math.round(delay / 60) : 0;
 
   if (!trip) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg }}>
-        <ScreenHeader back title="Route" />
-        <Text style={{ padding: 22, color: colors.muted }}>Loading route…</Text>
+        <ScreenHeader back title="Live directions" />
+        <Text style={{ ...uiFont, padding: 22, color: colors.muted }}>Loading your route…</Text>
       </View>
     );
   }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScreenHeader back title={trip.route_code} subtitle={live ? "District live demo" : trip.status} />
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 36 }}>
-      <View style={{ backgroundColor: "#0B1F3A", padding: 16, borderRadius: 12 }}>
-        <Text style={{ color: "#9DB7D8", fontSize: 12 }}>{trip.route_code}</Text>
-        <Text style={{ color: "white", fontSize: 22, fontWeight: "700" }}>{g?.instruction || "Follow planned stops"}</Text>
-        <Text style={{ color: "white", marginTop: 6 }}>
-          {g?.then ? `Then ${g.then}` : ""}
-        </Text>
-        <Text style={{ color: "white" }}>
-          {g?.follows_streets ? "Following streets" : "Straight-line fallback"}
-          {trip.is_simulated ? " · Simulated GPS" : ""}
-          {live ? " · District live demo" : ""}
-        </Text>
-      </View>
-      {Platform.OS !== "web" && bus ? (
-        <MapView
-          style={{ height: 280, borderRadius: 12 }}
-          region={{
-            latitude: bus.latitude,
-            longitude: bus.longitude,
-            latitudeDelta: 0.045,
-            longitudeDelta: 0.045,
-          }}
-        >
-          {coords.length > 1 ? <Polyline coordinates={coords} strokeColor="#4285F4" strokeWidth={5} /> : null}
-          {stops.map((s: { id: string; name: string; latitude: string; longitude: string }) => (
-            <Marker
-              key={s.id}
-              coordinate={{ latitude: Number(s.latitude), longitude: Number(s.longitude) }}
-              title={s.name}
-            />
-          ))}
-          <Marker coordinate={bus} title="Bus" pinColor="#B42318" />
-        </MapView>
-      ) : (
-        <Text style={{ fontSize: 12, color: "#5C6B7A" }}>
-          Map follows the stop polyline on a phone or tablet. On web, use the RouteWise site Route guide.
-        </Text>
-      )}
-      <Text>
-        {trip.status} · delay {Math.round(trip.current_delay_seconds / 60)} min
-      </Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <Btn label={sim ? "Driving…" : "Start trip"} onPress={() => startDrive()} />
-        <Btn label="Pause" onPress={() => act("pause/")} />
-        <Btn label="Resume" onPress={() => act("resume/")} />
-        <Btn label="Complete" onPress={() => act("complete/")} />
-      </View>
-      {(manifest || []).map((stop: { stop_id: string; stop_name: string; students: { id: string; first_name: string; last_name: string; wheelchair: boolean }[] }) => (
-        <View key={stop.stop_id} style={{ backgroundColor: "white", padding: 12, borderRadius: 10 }}>
-          <Text style={{ fontWeight: "700" }}>{stop.stop_name}</Text>
-          {stop.students.map((s) => (
-            <Text key={s.id}>
-              {s.first_name} {s.last_name}
-              {s.wheelchair ? " · wheelchair" : ""}
-            </Text>
-          ))}
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-            <Btn label="Arrive" onPress={() => act("arrive-stop/", { route_stop_id: stop.stop_id })} />
-            <Btn
-              label="All boarded"
-              onPress={() =>
-                act("depart-stop/", { route_stop_id: stop.stop_id, boarded_count: stop.students.length, absent_count: 0 })
-              }
-            />
-          </View>
-        </View>
-      ))}
-      <Pressable
-        onPress={() => setSim((v) => !v)}
-        style={{ backgroundColor: "#C47B16", padding: 14, borderRadius: 8, minHeight: 48, alignItems: "center" }}
-      >
-        <Text style={{ color: "white", fontWeight: "700" }}>{sim ? "Stop following" : "Follow route (demo)"}</Text>
-      </Pressable>
-      <Text style={{ fontSize: 12, color: "#5C6B7A" }}>
-        Follow route interpolates stop coordinates and posts GPS. It is labeled simulated and is not certified navigation.
-      </Text>
-      <TextInput
-        placeholder="Incident notes"
-        value={incident}
-        onChangeText={setIncident}
-        style={{ backgroundColor: "white", padding: 12, borderRadius: 8, minHeight: 48 }}
+      <ScreenHeader
+        back
+        title={live ? "Live directions" : "Route preview"}
+        subtitle={`${trip.route_code}  ·  ${trip.school_name || "School"}`}
+        right={<Chip label={lateMinutes ? `+${lateMinutes} min` : live ? "On the road" : "Parked"} tone={lateMinutes ? "warn" : live ? "success" : "neutral"} />}
       />
-      <Btn label="Report incident" onPress={() => report.mutate()} />
-      </ScrollView>
+      <View style={{ flex: 1 }}>
+        <LiveMap
+          bus={bus}
+          heading={heading}
+          progress={socket?.progress}
+          path={path}
+          stops={mappedStops}
+          myStopId={nextStop?.id}
+          title={nextName ? `Next: ${nextName}` : trip.route_code}
+          follow={Boolean(bus && live)}
+          fill
+        />
+      </View>
+      <GuidanceSheet
+        live={live}
+        lateMinutes={lateMinutes}
+        guidance={g}
+        nextStopName={nextName}
+        riders={ridersHere}
+        hidePractice={live}
+        practicing={practice}
+        onArrive={() => nextStop && void act("arrive-stop/", { route_stop_id: nextStop.id })}
+        onBoarded={() =>
+          nextStop &&
+          void act("depart-stop/", {
+            route_stop_id: nextStop.id,
+            boarded_count: ridersHere.length,
+            absent_count: 0,
+          })
+        }
+        onPractice={async () => {
+          tRef.current = 0.01;
+          try {
+            await act("start/");
+          } catch {
+            /* already active */
+          }
+          await api.post(`/trips/${tripId}/simulate-step/`, { t: 0.01 });
+          setPractice(true);
+        }}
+        onStopPractice={() => setPractice(false)}
+      />
+      {live ? (
+        <Pressable onPress={() => setIncidentOpen((v) => !v)} style={{ paddingHorizontal: 20, paddingVertical: 8 }}>
+          <Text style={{ ...uiFont, textAlign: "center", fontSize: 13, fontWeight: "600", color: colors.primary }}>
+            {incidentOpen ? "Hide incident" : "Report an incident"}
+          </Text>
+        </Pressable>
+      ) : null}
+      {incidentOpen ? (
+        <View style={{ paddingHorizontal: 20, paddingBottom: 20, gap: 8 }}>
+          <TextInput
+            placeholder="What happened?"
+            placeholderTextColor={colors.faint}
+            value={incident}
+            onChangeText={setIncident}
+            style={{
+              ...uiFont,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.surface,
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              fontSize: 15,
+              color: colors.ink,
+              minHeight: 48,
+            }}
+          />
+          <Pressable
+            onPress={() => report.mutate()}
+            style={{ minHeight: 46, borderRadius: 10, backgroundColor: colors.night, alignItems: "center", justifyContent: "center" }}
+          >
+            <Text style={{ ...uiFont, color: colors.white, fontWeight: "600" }}>{report.isPending ? "Sending…" : "Send to dispatch"}</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
-  );
-}
-
-function Btn({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={{ backgroundColor: "#0B1F3A", padding: 12, borderRadius: 8, minHeight: 44 }}>
-      <Text style={{ color: "white", fontWeight: "600" }}>{label}</Text>
-    </Pressable>
   );
 }

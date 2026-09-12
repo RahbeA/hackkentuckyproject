@@ -8,7 +8,7 @@ import { RiderCard } from "../../src/components/RiderCard";
 import { RideLiveCard } from "../../src/components/track/RideLiveCard";
 import { DartLogo } from "../../src/components/brand/DartLogo";
 import { ScreenHeader } from "../../src/components/ui/ScreenHeader";
-import { greeting } from "../../src/format";
+import { greeting, stubEta } from "../../src/format";
 import { colors, fonts } from "../../src/theme";
 
 export default function Today() {
@@ -17,7 +17,14 @@ export default function Today() {
   const { data: children } = useChildren();
   const { data: notes } = useNotifications();
   const { positions, connected } = useDistrictLive();
-  const riders = (etas || []).map((e) => mergeEta(e, e.trip_id ? positions[e.trip_id] : undefined));
+  const etaByStudent = new Map((etas || []).map((e) => [e.student_id, e]));
+  const kids = children?.length ? children : [];
+  const riders = kids.length
+    ? kids.map((c) => {
+        const raw = etaByStudent.get(c.id) || stubEta(c);
+        return mergeEta(raw, raw.trip_id ? positions[raw.trip_id] : undefined);
+      })
+    : (etas || []).map((e) => mergeEta(e, e.trip_id ? positions[e.trip_id] : undefined));
   const unread = (notes || []).some((n) => !n.is_read);
   const latest = (notes || [])[0];
   const liveRider = riders.find((e) => e.status === "active" || (e.trip_id && positions[e.trip_id]));
@@ -64,14 +71,12 @@ export default function Today() {
         <Text style={{ fontFamily: fonts.heading, fontSize: 27, letterSpacing: -0.6, color: colors.ink }}>{greeting()}</Text>
         <Text style={{ marginTop: 8, fontSize: 14, lineHeight: 22, color: colors.muted }}>
           {riders.length === 0
-            ? children?.length
-              ? connected
-                ? "Waiting for the district to start the live demo. Your rider's bus will appear here."
-                : "No trip is live yet for your riders."
-              : "No riders are linked to this account yet. Link a rider with the district code."
+            ? "No riders are linked yet. Enter a rider code (like AVA001) — that is not the district join code."
             : onRoad
               ? `${onRoad} rider${onRoad === 1 ? "" : "s"} on the road. Estimates update as the buses move.`
-              : "Estimates update as the buses move."}
+              : connected
+                ? "Waiting for the district to start the live demo. Your rider's bus will appear here."
+                : "Estimates update as the buses move."}
         </Text>
 
         {liveRider ? (
@@ -102,7 +107,8 @@ export default function Today() {
             >
               <Text style={{ fontSize: 15, fontWeight: "600", color: colors.ink }}>Link a rider</Text>
               <Text style={{ marginTop: 4, fontSize: 13, color: colors.muted }}>
-                Enter the six-character code from your district. Then their bus appears when the live demo starts.
+                Enter the rider code from Students (AVA001), not the district join code. Their bus appears when the
+                live demo starts.
               </Text>
             </Pressable>
           ) : null}

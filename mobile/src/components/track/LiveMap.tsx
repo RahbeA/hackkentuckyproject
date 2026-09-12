@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { Modal, Platform, Pressable, Text, View } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors } from "../../theme";
+import { interpolateAlong, lerpAngleDegrees, metersBetween, snapToPath, type Coord } from "../../geo/routePath";
+import { colors, uiFont } from "../../theme";
 import { SimulatedBadge } from "./SimulatedBadge";
 
 const darkStyle = [
@@ -14,8 +15,6 @@ const darkStyle = [
   { featureType: "water", elementType: "geometry", stylers: [{ color: "#0f172a" }] },
   { featureType: "poi", stylers: [{ visibility: "off" }] },
 ];
-
-type Coord = { latitude: number; longitude: number };
 
 function asCoord(c?: { latitude?: unknown; longitude?: unknown } | null): Coord | null {
   if (!c) return null;
@@ -29,20 +28,30 @@ function asCoord(c?: { latitude?: unknown; longitude?: unknown } | null): Coord 
 
 const LOUISVILLE = { latitude: 38.2527, longitude: -85.7585 };
 
+type Smooth = { latitude: number; longitude: number; heading: number };
+
 export function LiveMap({
   bus,
   heading,
   path,
+  progress,
   stops,
   myStopId,
   title,
+  follow = false,
+  height = 280,
+  fill = false,
 }: {
   bus?: Coord | null;
   heading?: number | null;
   path: Coord[];
+  progress?: number | null;
   stops: { id: string; name: string; latitude: number; longitude: number }[];
   myStopId?: string;
   title?: string;
+  follow?: boolean;
+  height?: number;
+  fill?: boolean;
 }) {
   const [full, setFull] = useState(false);
   const safeBus = asCoord(bus);
@@ -53,17 +62,20 @@ export function LiveMap({
   });
   const center = safeBus || safePath[0] || safeStops[0] || LOUISVILLE;
 
-  return (
+  const canvas = (
     <>
       <MapCanvas
         center={center}
         bus={safeBus}
         heading={heading}
         path={safePath}
+        progress={progress}
         stops={safeStops}
         myStopId={myStopId}
-        height={280}
-        delta={0.04}
+        height={fill ? undefined : height}
+        fill={fill}
+        delta={follow ? 0.012 : 0.04}
+        follow={follow}
         onToggle={() => setFull(true)}
         expanded={false}
       />
@@ -73,10 +85,11 @@ export function LiveMap({
           bus={safeBus}
           heading={heading}
           path={safePath}
+          progress={progress}
           stops={safeStops}
           myStopId={myStopId}
           fill
-          delta={0.012}
+          delta={0.01}
           follow
           title={title}
           onToggle={() => setFull(false)}
@@ -85,6 +98,7 @@ export function LiveMap({
       </Modal>
     </>
   );
+  return fill ? <View style={{ flex: 1 }}>{canvas}</View> : canvas;
 }
 
 function MapCanvas({
@@ -92,6 +106,7 @@ function MapCanvas({
   bus,
   heading,
   path,
+  progress,
   stops,
   myStopId,
   height,
@@ -106,6 +121,7 @@ function MapCanvas({
   bus?: Coord | null;
   heading?: number | null;
   path: Coord[];
+  progress?: number | null;
   stops: { id: string; name: string; latitude: number; longitude: number }[];
   myStopId?: string;
   height?: number;
@@ -118,14 +134,95 @@ function MapCanvas({
 }) {
   const mapRef = useRef<MapView>(null);
   const insets = useSafeAreaInsets();
+  const followBus = asCoord(bus);
+  const [smooth, setSmooth] = useState<Smooth | null>(null);
+
+  const targetRef = useRef<{ latitude: number; longitude: number; heading: number; progress: number } | null>(null);
+  const displayRef = useRef<Smooth & { progress: number } | null>(null);
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  const lastPaint = useRef(0);
 
   useEffect(() => {
-    if (!follow || !asCoord(bus)) return;
-    mapRef.current?.animateToRegion(
-      { latitude: bus.latitude, longitude: bus.longitude, latitudeDelta: delta, longitudeDelta: delta },
-      600,
-    );
-  }, [bus?.latitude, bus?.longitude, delta, follow]);
+    if (!followBus) {
+      targetRef.current = null;
+      displayRef.current = null;
+      setSmooth(null);
+      return;
+    }
+    const route = pathRef.current;
+    const snapped =
+      route.length >= 2
+        ? snapToPath(route, followBus.latitude, followBus.longitude)
+        : { latitude: followBus.latitude, longitude: followBus.longitude, heading: heading || 0, progress: 0 };
+    const nextProgress =
+      typeof progress === "number" && Number.isFinite(progress) && progress > 0
+        ? Math.min(1, progress)
+        : snapped.progress;
+    targetRef.current = {
+      latitude: snapped.latitude,
+      longitude: snapped.longitude,
+      heading: heading || snapped.heading,
+      progress: nextProgress,
+    };
+    if (!displayRef.current) {
+      const placed = route.length >= 2 ? interpolateAlong(route, nextProgress) : snapped;
+      displayRef.current = {
+        latitude: placed.latitude,
+        longitude: placed.longitude,
+        heading: heading || placed.heading,
+        progress: nextProgress,
+      };
+      setSmooth(displayRef.current);
+    }
+  }, [followBus?.latitude, followBus?.longitude, heading, progress]);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = (now: number) => {
+      const target = targetRef.current;
+      const display = displayRef.current;
+      const route = pathRef.current;
+      if (target && display) {
+        const jump = metersBetween(display, target) > 420;
+        if (jump) {
+          display.latitude = target.latitude;
+          display.longitude = target.longitude;
+          display.heading = target.heading;
+          display.progress = target.progress;
+        } else if (route.length >= 2) {
+          display.progress += (target.progress - display.progress) * 0.14;
+          const placed = interpolateAlong(route, display.progress);
+          display.latitude = placed.latitude;
+          display.longitude = placed.longitude;
+          display.heading = lerpAngleDegrees(display.heading, placed.heading, 0.2);
+        } else {
+          display.latitude += (target.latitude - display.latitude) * 0.12;
+          display.longitude += (target.longitude - display.longitude) * 0.12;
+          display.heading = lerpAngleDegrees(display.heading, target.heading, 0.14);
+        }
+
+        if (now - lastPaint.current >= 32) {
+          lastPaint.current = now;
+          setSmooth({ latitude: display.latitude, longitude: display.longitude, heading: display.heading });
+          if (followRef.current) {
+            mapRef.current?.setCamera({
+              center: { latitude: display.latitude, longitude: display.longitude },
+              heading: display.heading,
+              pitch: 38,
+              zoom: 16.2,
+              altitude: 720,
+            });
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   if (Platform.OS === "web") {
     return (
@@ -137,6 +234,8 @@ function MapCanvas({
       </View>
     );
   }
+
+  const pin = smooth || followBus;
 
   return (
     <View style={fill ? { flex: 1, backgroundColor: colors.mapNight } : { height: height || 280, backgroundColor: colors.mapNight }}>
@@ -151,6 +250,10 @@ function MapCanvas({
           latitudeDelta: delta,
           longitudeDelta: delta,
         }}
+        rotateEnabled={Boolean(follow)}
+        pitchEnabled={Boolean(follow)}
+        showsCompass={false}
+        mapPadding={follow && fill ? { top: 72, right: 0, bottom: 210, left: 0 } : undefined}
       >
         {path.length > 1 ? <Polyline coordinates={path} strokeColor={colors.primary} strokeWidth={4} /> : null}
         {stops.map((s) => (
@@ -162,11 +265,11 @@ function MapCanvas({
             tracksViewChanges={false}
           />
         ))}
-        {asCoord(bus) ? (
+        {pin ? (
           <Marker
-            coordinate={bus}
+            coordinate={{ latitude: pin.latitude, longitude: pin.longitude }}
             title="Bus"
-            rotation={heading || 0}
+            rotation={smooth?.heading ?? heading ?? 0}
             anchor={{ x: 0.5, y: 0.5 }}
             flat
             tracksViewChanges={false}
@@ -179,7 +282,6 @@ function MapCanvas({
                 backgroundColor: colors.primary,
                 borderWidth: 2,
                 borderColor: colors.white,
-                transform: [{ rotate: `${heading || 0}deg` }],
               }}
             />
           </Marker>
@@ -226,7 +328,7 @@ function MapCanvas({
             paddingVertical: 9,
           }}
         >
-          <Text style={{ fontSize: 14, fontWeight: "600", color: colors.ink }} numberOfLines={1}>
+          <Text style={{ ...uiFont, fontSize: 14, fontWeight: "600", color: colors.ink }} numberOfLines={1}>
             {title}
           </Text>
         </View>

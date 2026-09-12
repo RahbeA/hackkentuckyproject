@@ -1,7 +1,9 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Upload } from "lucide-react";
+import { Download, Upload } from "lucide-react";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { LogoMark } from "../components/brand/Logo";
@@ -337,6 +339,17 @@ export function OnboardingPage() {
             <p className="mt-3 max-w-[34em] text-base leading-relaxed text-slate">
               Schools and students are required. Add stops, vehicles, and drivers if you have them.
             </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {TYPE_ORDER.map((t) => (
+                <a
+                  key={t}
+                  className="btn-secondary capitalize !py-2 text-xs"
+                  href={`${API_BASE}/imports/test-flow/happy_path/${t}/`}
+                >
+                  <Download size={14} /> {t}.csv
+                </a>
+              ))}
+            </div>
           </div>
 
           <label

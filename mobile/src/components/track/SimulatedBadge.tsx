@@ -1,4 +1,5 @@
 import { Text, View } from "react-native";
+import { uiFont } from "../../theme";
 
 export function SimulatedBadge() {
   return (
@@ -18,10 +19,9 @@ export function SimulatedBadge() {
     >
       <Text
         style={{
+          ...uiFont,
           fontSize: 10,
           fontWeight: "700",
-          letterSpacing: 0.6,
-          textTransform: "uppercase",
           color: "rgba(255,255,255,.62)",
         }}
       >

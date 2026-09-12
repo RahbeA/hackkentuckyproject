@@ -11,14 +11,20 @@ export function NotificationRow({
   onTrack?: () => void;
 }) {
   const delay = item.event_type?.includes("delay") || /late/i.test(item.title);
+  const payloadType = typeof item.payload?.alert_type === "string" ? item.payload.alert_type : "";
+  const emergency =
+    item.event_type === "alert.guardian" ||
+    ["accident", "breakdown", "running_late", "other"].includes(payloadType);
+  const accent = emergency ? colors.danger : delay ? colors.warn : colors.border;
+  const showAccent = (emergency || delay) && !item.is_read;
   return (
     <View
       style={{
         backgroundColor: colors.surface,
         borderWidth: 1,
         borderColor: colors.border,
-        borderLeftWidth: delay && !item.is_read ? 3 : 1,
-        borderLeftColor: delay && !item.is_read ? colors.warn : colors.border,
+        borderLeftWidth: showAccent ? 3 : 1,
+        borderLeftColor: showAccent ? accent : colors.border,
         borderRadius: 12,
         padding: 16,
         opacity: item.is_read ? 0.72 : 1,

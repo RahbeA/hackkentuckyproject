@@ -81,3 +81,27 @@ export function isToday(iso?: string) {
 export function childName(child: { first_name: string; last_name?: string | null }) {
   return [child.first_name, child.last_name].filter(Boolean).join(" ");
 }
+
+export function stubEta(child: { id: string; first_name: string; school_name?: string | null }): GuardianEta {
+  return {
+    student_id: child.id,
+    student_first_name: child.first_name,
+    stop_name: null,
+    scheduled_pickup: null,
+    status: "scheduled",
+    delay_seconds: 0,
+    p50_eta: null,
+    is_simulated: false,
+    on_time: true,
+    trip_id: null,
+    route_code: null,
+    school_name: child.school_name || null,
+    current_stop_sequence: 0,
+    stop_count: 0,
+    my_stop_sequence: null,
+    late_probability: 0,
+    latitude: null,
+    longitude: null,
+    heading: null,
+  };
+}

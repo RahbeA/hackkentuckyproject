@@ -364,8 +364,7 @@ function StaffLive({ districtId, canControl }: { districtId: string; canControl:
         <div>
           <h1 className="font-display text-[28px] font-bold tracking-tight">Live operations</h1>
           <p className="mt-1.5 max-w-[46em] text-sm leading-relaxed text-slate">
-            Every route on one board. Buses stay locked to their colored path — click one to follow it, or open
-            fullscreen for the big picture.
+            Press Start live demo. Buses lock to their colored path — click one to follow it.
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -640,8 +639,8 @@ function GuardianLive() {
         <div>
           <h1 className="font-display text-[28px] font-bold tracking-tight">Where's my bus?</h1>
           <p className="mt-1.5 max-w-[42em] text-sm leading-relaxed text-slate">
-            Follow your child's bus in real time. You'll see it move stop to stop and get notified the moment
-            anything changes.
+            This Family account only sees Ava Bennett. If the map is empty, switch back to admin and press Start live
+            demo.
           </p>
         </div>
         <LivePill running={running} connected={connected} />

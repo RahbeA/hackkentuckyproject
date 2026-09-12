@@ -271,6 +271,40 @@ def _commit_students(district, rows, mapping):
         _assign_nearest_stop(student, approved_stops)
 
 
+def ensure_boarding_stops(district, students=None) -> list:
+    """Give every student an AM stop so generate does not fail on import order.
+
+    Uses approved stops if any exist. Otherwise creates an approved stop at
+    each student's home.
+    """
+    students = list(
+        students
+        if students is not None
+        else Student.objects.filter(district=district, is_active=True)
+    )
+    approved = list(district.busstops.filter(is_approved=True))
+    if not approved:
+        for student in students:
+            if student.latitude is None or student.longitude is None:
+                continue
+            code = f"HOME-{(student.external_id or str(student.id))[:28]}"
+            stop, _ = BusStop.objects.update_or_create(
+                district=district,
+                stop_code=code,
+                defaults={
+                    "name": student.home_address or f"{student.first_name}'s stop",
+                    "address": student.home_address or "Home",
+                    "latitude": student.latitude,
+                    "longitude": student.longitude,
+                    "is_approved": True,
+                },
+            )
+            approved.append(stop)
+    for student in students:
+        _assign_nearest_stop(student, approved)
+    return students
+
+
 def _assign_nearest_stop(student, approved_stops) -> None:
     """Attach the student to their nearest approved stop for the morning run.
 
@@ -360,6 +394,9 @@ def _commit_stops(district, rows, mapping):
                 "safety_notes": _cell(row, mapping, "safety_notes"),
             },
         )
+    approved = list(district.busstops.filter(is_approved=True))
+    for student in Student.objects.filter(district=district, is_active=True):
+        _assign_nearest_stop(student, approved)
 
 
 def _parse_time(value: str):

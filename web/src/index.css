@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -38,7 +38,8 @@ h1,
 h2,
 h3,
 .font-display {
-  font-family: "Space Grotesk", Inter, system-ui, sans-serif;
+  /* Inter only — Space Grotesk Bold/Medium paint word spaces at zero width in Safari. */
+  font-family: Inter, system-ui, sans-serif;
 }
 
 /* ---------------------------------------------------------------- Buttons */
@@ -776,4 +777,192 @@ h3,
     offset-distance: 55%;
     opacity: 1;
   }
+}
+
+/* Transform-scale can collapse word spaces at fractional sizes. */
+.pitch-deck {
+  word-spacing: 0.08em;
+}
+.pitch-deck .font-mono {
+  word-spacing: 0.02em;
+}
+
+/* ── Pitch deck motion (from DART motion / official deck sheet) ── */
+@keyframes pitchWipe {
+  0% { clip-path: inset(0 100% 0 0); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+@keyframes pitchEdge {
+  0% { left: 0; opacity: 0; }
+  8% { opacity: 1; }
+  92% { left: calc(100% - 3px); opacity: 1; }
+  100% { left: calc(100% - 3px); opacity: 0; visibility: hidden; }
+}
+@keyframes pitchDraw {
+  0% { stroke-dashoffset: var(--len); }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes pitchPointer {
+  0% { offset-distance: 0%; opacity: 0; }
+  8% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 1; }
+}
+@keyframes pitchPing {
+  0% { opacity: 0.55; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2.3); }
+}
+@keyframes pitchInHead {
+  0% { opacity: 0; transform: translateY(18px); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes pitchInCard {
+  0% { opacity: 0; transform: translateY(22px); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes pitchNode {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+@keyframes pitchSpinY {
+  0%, 100% { transform: rotateY(-16deg); }
+  50% { transform: rotateY(16deg); }
+}
+@keyframes pitchBar {
+  0% { transform: scaleY(0.16); }
+  100% { transform: scaleY(1); }
+}
+@keyframes pitchWordOpen {
+  0% {
+    opacity: 0;
+    transform: translateY(52px) skewX(-7deg);
+    clip-path: inset(100% 0 -12% 0);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(-4px) skewX(1deg);
+    clip-path: inset(0 0 -12% 0);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    clip-path: inset(0 0 -12% 0);
+  }
+}
+@keyframes pitchWordDart {
+  0% {
+    opacity: 0;
+    transform: scale(0.78) translateY(36px);
+    filter: blur(6px);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1.05) translateY(-6px);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes pitchWordSub {
+  0% { opacity: 0; transform: translateY(16px); letter-spacing: 0.22em; }
+  100% { opacity: 1; transform: none; letter-spacing: 0.14em; }
+}
+@keyframes pitchWordLine {
+  0% { transform: scaleX(0); opacity: 0; }
+  100% { transform: scaleX(1); opacity: 1; }
+}
+
+.pitch-wipe {
+  animation: pitchWipe 1.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pitch-wipe-edge {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 3px;
+  border-radius: 99px;
+  background: #2563eb;
+  opacity: 0;
+  pointer-events: none;
+  animation: pitchEdge 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.pitch-draw {
+  stroke-dasharray: var(--len);
+  stroke-dashoffset: var(--len);
+  animation: pitchDraw 2.4s cubic-bezier(0.45, 0, 0.3, 1) both;
+}
+.pitch-pointer {
+  offset-rotate: auto 90deg;
+  offset-anchor: 50% 50%;
+  animation: pitchPointer 2.4s cubic-bezier(0.45, 0, 0.3, 1) both;
+}
+.pitch-spin-mark {
+  transform-style: preserve-3d;
+  animation: pitchSpinY 6.5s ease-in-out infinite;
+}
+.pitch-in-head {
+  animation: pitchInHead 0.7s cubic-bezier(0.16, 0.84, 0.26, 1) both;
+}
+.pitch-in-lead {
+  animation: pitchInHead 0.7s cubic-bezier(0.16, 0.84, 0.26, 1) 0.1s both;
+}
+.pitch-in-card {
+  animation: pitchInCard 0.64s cubic-bezier(0.16, 0.84, 0.26, 1) both;
+}
+.pitch-in-card[data-i="1"] { animation-delay: 0.08s; }
+.pitch-in-card[data-i="2"] { animation-delay: 0.16s; }
+.pitch-in-card[data-i="3"] { animation-delay: 0.24s; }
+.pitch-in-card[data-i="4"] { animation-delay: 0.32s; }
+.pitch-in-card[data-i="5"] { animation-delay: 0.4s; }
+.pitch-bar {
+  transform-origin: bottom;
+  animation: pitchBar 0.72s cubic-bezier(0.16, 0.84, 0.26, 1) both;
+}
+.pitch-word-open {
+  display: inline-block;
+  animation: pitchWordOpen 0.92s cubic-bezier(0.16, 0.84, 0.26, 1) both;
+  animation-delay: var(--word-delay, 0s);
+}
+.pitch-word-dart {
+  animation: pitchWordDart 1.05s cubic-bezier(0.16, 0.84, 0.26, 1) both;
+  animation-delay: var(--word-delay, 0.45s);
+}
+.pitch-word-sub {
+  animation: pitchWordSub 0.78s cubic-bezier(0.16, 0.84, 0.26, 1) both;
+  animation-delay: var(--word-delay, 1.15s);
+}
+.pitch-word-line {
+  transform-origin: left center;
+  animation: pitchWordLine 0.72s cubic-bezier(0.16, 0.84, 0.26, 1) both;
+  animation-delay: var(--word-delay, 0.32s);
+}
+.pitch-wipe-delayed {
+  animation-delay: 0.52s;
+}
+.pitch-wipe-edge-delayed {
+  animation-delay: 0.52s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pitch-wipe,
+  .pitch-wipe-edge,
+  .pitch-draw,
+  .pitch-pointer,
+  .pitch-spin-mark,
+  .pitch-in-head,
+  .pitch-in-lead,
+  .pitch-in-card,
+  .pitch-bar,
+  .pitch-word-open,
+  .pitch-word-dart,
+  .pitch-word-sub,
+  .pitch-word-line {
+    animation: none !important;
+  }
+  .pitch-draw { stroke-dashoffset: 0; }
+  .pitch-pointer { opacity: 1; }
+  .pitch-wipe-edge { display: none; }
 }

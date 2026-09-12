@@ -1,32 +1,45 @@
-# Demo script (about 6 minutes)
+# Judge walkthrough (about 6 minutes)
 
-All names, GPS, and models are fictional. Say that out loud.
+You do not need us in the room. Jefferson Demo Schools is already seeded. **Do not import CSVs** unless you want to test onboarding.
 
-## Fully implemented
+All names, GPS, and models are fictional.
 
-Seeded Jefferson Demo Schools, JWT roles, tenant isolation, CSV mapper, OR-Tools morning routes, synthetic quantile ML wired into fastest vs reliability, plan comparison, Monte Carlo twin, simulated GPS, dispatcher alerts, driver and guardian apps, `rundev.sh`.
+## Start here
 
-## Simulated
+1. Open the web app.
+2. Press **Start guided demo**.
+3. On the sign-in screen, press **Start walkthrough**.
+4. Follow the blue coach at the top of each screen. **Next** moves you and switches accounts when needed.
 
-Bus motion (`Simulate Drive` / `simulate-step`), dispatcher disruption minutes, digital-twin weather/traffic, dwell time noise.
+Password for every demo account: `DemoPass123!`
 
-## Trained on synthetic data
+| Role | Email | What you see |
+| --- | --- | --- |
+| District admin (recommended) | admin@jefferson.demo | Full console + walkthrough |
+| Family | guardian@jefferson.demo | Ava Bennett only |
+| Driver | driver@jefferson.demo | Assigned run |
+| Planner | planner@jefferson.demo | Route planner |
+| Dispatcher | dispatcher@jefferson.demo | Alerts + Start live demo |
 
-P50/P90 travel models and the late classifier. Metrics screens show the disclaimer.
+## The six screens
 
-## Future production work
+1. **District board** — six KPIs and a fleet map.
+2. **Route planner** — a reliability plan is already published. Optional: generate Fastest.
+3. **Compare plans** — mileage, vehicles, on-time. Compare may run itself.
+4. **Rainy-morning test** — press Run stress test. Read the interpretation.
+5. **Start the buses** — press **Start live demo**. Click a route to follow it.
+6. **Family view** — Next signs you in as a parent. You should only see Ava.
 
-Real map-matching at scale, self-hosted OSRM extract for offline street matrix, student information system connectors, FERPA review, hardware AVL, certified routing, push notifications at scale, PostGIS spatial indexes, hardened JWT cookies.
+Sidebar **View as family** / **View as driver** switches accounts without hunting through login.
 
----
+## If the map is empty
 
-1. **District admin login** — http://localhost:5173 — `admin@jefferson.demo` / `DemoPass123!`.
-2. **Import** — Onboarding: upload `sample_data/students.csv`, confirm mapping, validate.
-3. **Fastest plan** — Planner, Oakridge, mode Fastest, Generate. Map colors routes.
-4. **Bad-day risk** — Open a generated route’s risk copy. Note thin bell slack.
-5. **Reliability plan** — Generate with Reliability mode (uses P90).
-6. **Compare** — Compare page, fastest vs reliability: mileage, vehicles, on-time.
-7. **Rain and traffic** — Digital twin: rain on, traffic 0.7, 750 simulations. Read the interpretation.
-8. **Driver simulated trip** — Publish the reliability plan. Expo / driver login `driver@jefferson.demo`. Open today’s trip, **Simulate Drive**.
-9. **Dispatcher alert** — Dispatcher console: at-risk trip, predicted delay, Acknowledge. Optional “Simulate disruption.”
-10. **Guardian ETA** — `guardian@jefferson.demo` sees only Ava Bennett, stop, delayed/on-time, no manifests and no other children.
+A staff user must press **Start live demo** on Live or Dispatcher first. Then switch back to Family or Driver.
+
+## Mobile (optional)
+
+This phone app is Family + Driver only. Tap **Family · Ava Bennett only**. If the bus is still, start the live demo on the web console.
+
+## What is simulated
+
+Bus motion, dispatcher disruption minutes, digital-twin weather/traffic, dwell noise. Travel models are trained on synthetic data. Do not navigate a real bus with this app.

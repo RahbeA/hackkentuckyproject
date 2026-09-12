@@ -53,8 +53,8 @@ export function AbsenceSheet({
           />
           <Option
             selected={scope === "all"}
-            title="All day"
-            subtitle="Skip the morning and afternoon run"
+            title="All day (note to dispatch)"
+            subtitle="This product is morning-only. We'll tell dispatch they are out for the day."
             onPress={() => setScope("all")}
           />
 

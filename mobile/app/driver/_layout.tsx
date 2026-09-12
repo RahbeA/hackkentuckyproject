@@ -13,7 +13,8 @@ export default function DriverLayout() {
     );
   }
   if (!user) return <Redirect href="/welcome" />;
-  if (user.role !== "driver") return <Redirect href="/(guardian)/today" />;
+  if (user.role === "guardian") return <Redirect href="/(guardian)/today" />;
+  if (user.role !== "driver") return <Redirect href="/staff" />;
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }

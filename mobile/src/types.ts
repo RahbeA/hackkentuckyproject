@@ -6,6 +6,15 @@ export type Role =
   | "district_admin"
   | "platform_admin";
 
+export const ROLE_LABEL: Record<Role, string> = {
+  guardian: "Family",
+  driver: "Driver",
+  planner: "Planner",
+  dispatcher: "Dispatcher",
+  district_admin: "District admin",
+  platform_admin: "Platform admin",
+};
+
 export interface Me {
   id: string;
   email: string;
@@ -47,6 +56,7 @@ export interface GuardianEta {
   latitude: number | null;
   longitude: number | null;
   heading: number | null;
+  progress?: number | null;
 }
 
 export interface RouteStop {

@@ -45,6 +45,9 @@ class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
+    def validate_email(self, value):
+        return value.strip().lower()
+
 
 def _tokens_for(user: User) -> dict:
     refresh = RefreshToken.for_user(user)
@@ -58,11 +61,13 @@ class LoginView(APIView):
     def post(self, request):
         ser = LoginSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        user = authenticate(
-            request,
-            username=ser.validated_data["email"],
-            password=ser.validated_data["password"],
-        )
+        email = ser.validated_data["email"]
+        password = ser.validated_data["password"]
+        user = authenticate(request, username=email, password=password)
+        if user is None:
+            candidate = User.objects.filter(email__iexact=email).first()
+            if candidate and candidate.is_active and candidate.check_password(password):
+                user = candidate
         if user is None or not user.is_active:
             raise RouteWiseError("Invalid email or password.", code="INVALID_CREDENTIALS", status_code=401)
         return Response({"user": UserSerializer(user).data, "tokens": _tokens_for(user)})
@@ -145,6 +150,17 @@ def _resolve_join_district(join_code: str | None, district_id) -> District | Non
     return None
 
 
+def _driver_employee_id(district) -> str:
+    """A unique-per-district employee id for a self-service driver signup."""
+    from apps.transportation.models import DriverProfile
+
+    for _ in range(10):
+        candidate = f"SD-{uuid.uuid4().hex[:6].upper()}"
+        if not DriverProfile.objects.filter(district=district, employee_id=candidate).exists():
+            return candidate
+    return f"SD-{uuid.uuid4().hex[:10].upper()}"
+
+
 def _unique_slug(name: str) -> str:
     base = slugify(name) or "district"
     slug = base
@@ -202,6 +218,15 @@ class RegisterView(APIView):
             district=district,
             is_active=True,
         )
+        # A self-service driver needs a DriverProfile, otherwise they never show
+        # up in the district's Drivers roster and can't be assigned to a trip.
+        if role == UserRole.DRIVER:
+            from apps.transportation.models import DriverProfile
+
+            DriverProfile.objects.get_or_create(
+                user=user,
+                defaults={"district": district, "employee_id": _driver_employee_id(district)},
+            )
         return Response({"user": UserSerializer(user).data, "tokens": _tokens_for(user)}, status=201)
 
 

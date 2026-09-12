@@ -1,5 +1,5 @@
 import { ActivityIndicator, Pressable, Text, type PressableProps, type ViewStyle } from "react-native";
-import { colors } from "../../theme";
+import { colors, uiFont } from "../../theme";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
@@ -41,7 +41,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={palette.fg} />
       ) : (
-        <Text style={{ color: palette.fg, fontSize: variant === "primary" ? 16 : 15, fontWeight: "600" }}>{label}</Text>
+        <Text style={{ ...uiFont, color: palette.fg, fontSize: variant === "primary" ? 16 : 15, fontWeight: "600" }}>{label}</Text>
       )}
     </Pressable>
   );

@@ -122,7 +122,7 @@ export function DashboardPage() {
         <div>
           <h1 className="font-display text-[28px] font-bold tracking-tight">District operations</h1>
           <p className="mt-1.5 max-w-[44em] text-sm leading-relaxed text-slate">
-            Live picture of {districtName}. Predictions use synthetic models.
+            Live picture of {districtName}. Roster and routes are already seeded. Predictions use synthetic models.
           </p>
           {(user?.role === "guardian" || user?.role === "driver") && (
             <p className="mt-3 rounded-xl border border-line bg-canvas px-4 py-3 text-sm text-slate">

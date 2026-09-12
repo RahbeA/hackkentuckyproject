@@ -174,6 +174,14 @@ class DemoController:
                     else:
                         trip.save(update_fields=["current_stop_sequence"])
 
+                    seq = int(trip.current_stop_sequence or 0)
+                    trip_stops = stops_by_trip.get(tid, [])
+                    upcoming = next(
+                        (s for s in trip_stops if s["sequence"] > seq and s["kind"] != "depot"),
+                        None,
+                    )
+                    if upcoming is None:
+                        upcoming = next((s for s in trip_stops if s["kind"] == "school"), None)
                     broadcast_event(
                         trip,
                         "trip.position.updated",
@@ -182,13 +190,14 @@ class DemoController:
                             "longitude": float(lng),
                             "heading": float(heading),
                             "progress": round(t, 4),
-                            "current_stop_sequence": trip.current_stop_sequence,
-                            "stop_count": len(stops_by_trip.get(tid, [])),
+                            "current_stop_sequence": seq,
+                            "stop_count": len(trip_stops),
                             "delay_seconds": trip.current_delay_seconds,
                             "late_probability": trip.late_probability,
                             "p50_eta": trip.current_p50_eta.isoformat() if trip.current_p50_eta else None,
                             "is_simulated": True,
                             "route_code": trip.route.route_code if trip.route_id else "",
+                            "next_stop_name": upcoming["name"] if upcoming else None,
                             "live_demo": True,
                         },
                     )
@@ -270,6 +279,16 @@ def start_demo(district, hero_route_ids: list | None = None) -> dict:
     attach_linked_riders(district)
     heroes = list(hero_route_ids or []) or hero_route_ids_for_district(district)
     trip_ids, hero_id = _select_trips(district, heroes)
+    if hero_id:
+        from django.conf import settings
+        from apps.operations.models import Trip
+        from apps.transportation.models import DriverProfile
+
+        demo_driver = DriverProfile.objects.filter(
+            user__email=settings.DEMO_DRIVER_EMAIL, district=district
+        ).first()
+        if demo_driver:
+            Trip.objects.filter(id=hero_id).update(driver=demo_driver)
     if not trip_ids:
         raise RouteWiseError(
             "No routes are ready to simulate. Import a roster, generate or publish a route plan, "
@@ -302,3 +321,17 @@ def demo_status(district) -> dict:
         if controller:
             return controller.status()
     return {"running": False, "progress": 0.0, "trip_ids": [], "hero_id": None}
+
+
+def running_trip_ids(district_id) -> list[str]:
+    """Trip ids currently being animated by a running demo in this district.
+
+    Lets a driver who has no assigned run follow along with the live demo.
+    """
+    if not district_id:
+        return []
+    with _lock:
+        controller = _controllers.get(str(district_id))
+        if controller and controller.running:
+            return list(controller.trip_ids)
+    return []

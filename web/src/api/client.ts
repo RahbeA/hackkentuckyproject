@@ -60,6 +60,12 @@ api.interceptors.response.use(
 export type ApiError = { error?: { code: string; message: string; details?: Record<string, unknown> } };
 
 export function errorMessage(err: unknown): string {
-  const ax = err as { response?: { data?: ApiError } };
-  return ax.response?.data?.error?.message || (err as Error).message || "Something went wrong.";
+  const ax = err as { response?: { data?: ApiError & Record<string, unknown> } };
+  const data = ax.response?.data;
+  if (data?.error?.message) return data.error.message;
+  if (data) {
+    const fields = Object.entries(data).find(([, v]) => Array.isArray(v) && typeof v[0] === "string");
+    if (fields) return String((fields[1] as string[])[0]);
+  }
+  return (err as Error).message || "Something went wrong.";
 }

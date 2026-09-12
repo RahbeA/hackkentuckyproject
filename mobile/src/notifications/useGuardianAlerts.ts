@@ -7,6 +7,13 @@ import { sendDartNotice } from "./push";
 
 type Prefs = { eta: boolean; delay: boolean; school: boolean };
 
+const EMERGENCY_ALERT_TYPES = new Set(["accident", "breakdown", "running_late", "other"]);
+
+function isGuardianEmergency(note: AppNotification) {
+  const payloadType = typeof note.payload?.alert_type === "string" ? note.payload.alert_type : "";
+  return note.event_type === "alert.guardian" || EMERGENCY_ALERT_TYPES.has(payloadType);
+}
+
 export function useGuardianAlerts(
   etas: GuardianEta[] | undefined,
   notes: AppNotification[] | undefined,
@@ -46,8 +53,27 @@ export function useGuardianAlerts(
   }, [enabled, etas, prefs.delay, prefs.eta]);
 
   useEffect(() => {
+    if (!enabled || !notes?.length) return;
+    for (const note of notes) {
+      if (!isGuardianEmergency(note)) continue;
+      const key = `emergency:${note.id}`;
+      if (seen.current.has(key)) continue;
+      seen.current.add(key);
+      const studentId = typeof note.payload?.student_id === "string" ? note.payload.student_id : undefined;
+      void sendDartNotice({
+        title: note.title,
+        body: note.body,
+        kind: "emergency",
+        screen: "updates",
+        studentId,
+      });
+    }
+  }, [enabled, notes]);
+
+  useEffect(() => {
     if (!enabled || !prefs.school || !notes?.length) return;
     for (const note of notes) {
+      if (isGuardianEmergency(note)) continue;
       const schoolish = /school|announce|office|bell|district/i.test(`${note.event_type || ""} ${note.title}`);
       if (!schoolish) continue;
       const key = `school:${note.id}`;

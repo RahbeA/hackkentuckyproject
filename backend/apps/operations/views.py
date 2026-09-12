@@ -14,9 +14,12 @@ from apps.operations.serializers import (
     TripDetailSerializer,
     TripListSerializer,
 )
-from apps.operations.services.lifecycle import broadcast_event, ingest_gps, notify_guardians_for_trip, refresh_trip_eta
+from apps.operations.services.alerts import send_guardian_trip_alert
+from apps.operations.services.assignments import add_student_to_trip, assign_trip_driver, remove_student_from_trip
+from apps.operations.services.lifecycle import broadcast_event, ingest_gps, refresh_trip_eta
 from apps.operations.services.rider_routes import boarding_for_student, guardian_route_ids, rider_claim_code
 from apps.routing.models import RouteStopStudent
+from apps.transportation.models import Student
 from common.exceptions.errors import RouteWiseError
 from common.permissions.roles import HasRole
 from common.permissions.tenancy import TenantQuerySetMixin
@@ -27,20 +30,6 @@ STAFF = (
     UserRole.PLANNER,
     UserRole.DISPATCHER,
 )
-
-# Dispatcher-initiated guardian alerts. Accident/breakdown also log an
-# Incident (a real operational event); running-late/other are communication
-# only — being behind schedule isn't itself an incident, and the automatic
-# ML-driven delay alert (see lifecycle.maybe_raise_delay_alert) already
-# covers that case unprompted. Accident/breakdown bypass guardian
-# notification-preference muting since they're safety-critical.
-GUARDIAN_ALERT_TYPES = {
-    "accident": {"incident_type": Incident.Type.ACCIDENT, "default_severity": "critical", "title": "Accident reported", "bypass_preferences": True},
-    "breakdown": {"incident_type": Incident.Type.BREAKDOWN, "default_severity": "critical", "title": "Bus breakdown", "bypass_preferences": True},
-    "running_late": {"incident_type": None, "default_severity": "warning", "title": "Running significantly late", "bypass_preferences": False},
-    "other": {"incident_type": Incident.Type.OTHER, "default_severity": "warning", "title": "Dispatcher alert", "bypass_preferences": False},
-}
-
 
 class TripViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = TripListSerializer
@@ -60,7 +49,17 @@ class TripViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
         if user.role == UserRole.DRIVER:
-            return qs.filter(driver__user=user)
+            owned = qs.filter(driver__user=user)
+            if owned.exists():
+                return owned
+            # Driver has no assigned run — let them follow the district live demo
+            # so they can see the drive experience even without a route today.
+            from apps.operations.services.live_demo import running_trip_ids
+
+            live_ids = running_trip_ids(user.district_id)
+            if live_ids:
+                return qs.filter(id__in=live_ids)
+            return owned
         if user.role == UserRole.GUARDIAN:
             student_ids = list(
                 GuardianStudentLink.objects.filter(guardian=user, is_verified=True).values_list(
@@ -76,9 +75,35 @@ class TripViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         user = self.request.user
         if user.role in STAFF:
             return
-        if user.role == UserRole.DRIVER and trip.driver and trip.driver.user_id == user.id:
-            return
+        if user.role == UserRole.DRIVER:
+            if trip.driver and trip.driver.user_id == user.id:
+                return
+            # A driver without a run may follow a trip that the district live
+            # demo is currently animating (read-only follow experience).
+            from apps.operations.services.live_demo import running_trip_ids
+
+            if str(trip.id) in running_trip_ids(user.district_id):
+                return
         raise RouteWiseError("You cannot access this trip.", code="FORBIDDEN", status_code=403)
+
+    def _require_staff(self):
+        if self.request.user.role not in STAFF:
+            raise RouteWiseError("Only district staff can change assignments.", code="FORBIDDEN", status_code=403)
+
+    def update(self, request, *args, **kwargs):
+        self._require_staff()
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._require_staff()
+        return super().partial_update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        serializer.save()
+        trip = serializer.instance
+        if "driver" in serializer.validated_data and trip.route_id:
+            trip.route.assigned_driver = trip.driver
+            trip.route.save(update_fields=["assigned_driver"])
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
@@ -186,6 +211,124 @@ class TripViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
             )
         return Response(payload)
 
+    @action(detail=False, methods=["get"], url_path="assignment-board")
+    def assignment_board(self, request):
+        """Today's trips with driver + roster so staff can edit assignments in one screen."""
+        self._require_staff()
+        qs = self.get_queryset().prefetch_related("route__stops__students__student")
+        service_date = request.query_params.get("service_date")
+        if service_date:
+            qs = qs.filter(service_date=service_date)
+        else:
+            today = timezone.localdate()
+            if qs.filter(service_date=today).exists():
+                qs = qs.filter(service_date=today)
+            else:
+                latest = qs.order_by("-service_date").values_list("service_date", flat=True).first()
+                if latest:
+                    qs = qs.filter(service_date=latest)
+        qs = qs.select_related("route__school", "driver__user", "vehicle", "district").order_by(
+            "route__route_code", "service_date"
+        )
+        trips = []
+        seated_ids: set = set()
+        board_date = None
+        for trip in qs:
+            if board_date is None:
+                board_date = trip.service_date
+            students = []
+            for stop in trip.route.stops.all():
+                for row in stop.students.all():
+                    if row.action != RouteStopStudent.Action.BOARD:
+                        continue
+                    s = row.student
+                    seated_ids.add(s.id)
+                    students.append(
+                        {
+                            "id": str(s.id),
+                            "first_name": s.first_name,
+                            "last_name": s.last_name,
+                            "grade": s.grade,
+                            "wheelchair": s.requires_wheelchair,
+                            "stop_id": str(stop.id),
+                            "stop_name": stop.name,
+                        }
+                    )
+            trips.append(
+                {
+                    "id": str(trip.id),
+                    "route": str(trip.route_id),
+                    "route_code": trip.route.route_code,
+                    "district_name": trip.district.name if trip.district_id else None,
+                    "school": str(trip.route.school_id) if trip.route.school_id else None,
+                    "school_name": trip.route.school.name if trip.route.school_id else None,
+                    "service_date": trip.service_date,
+                    "status": trip.status,
+                    "driver": str(trip.driver_id) if trip.driver_id else None,
+                    "driver_name": trip.driver.user.full_name if trip.driver_id else None,
+                    "vehicle": str(trip.vehicle_id) if trip.vehicle_id else None,
+                    "vehicle_number": trip.vehicle.internal_number if trip.vehicle_id else None,
+                    "student_count": len(students),
+                    "stops": [
+                        {"id": str(s.id), "name": s.name, "sequence": s.sequence, "kind": s.kind}
+                        for s in trip.route.stops.all()
+                    ],
+                    "students": students,
+                }
+            )
+        unassigned_qs = Student.objects.filter(is_active=True).exclude(id__in=seated_ids)
+        if request.user.district_id:
+            unassigned_qs = unassigned_qs.filter(district_id=request.user.district_id)
+        elif qs:
+            unassigned_qs = unassigned_qs.filter(district_id__in={t.district_id for t in qs})
+        unassigned = [
+            {
+                "id": str(s.id),
+                "first_name": s.first_name,
+                "last_name": s.last_name,
+                "grade": s.grade,
+                "school_name": s.school.name if s.school_id else None,
+            }
+            for s in unassigned_qs.select_related("school").order_by("last_name", "first_name")[:400]
+        ]
+        return Response({"service_date": board_date, "trips": trips, "unassigned": unassigned})
+
+    @action(detail=True, methods=["post"], url_path="assign-driver")
+    def assign_driver(self, request, pk=None):
+        self._require_staff()
+        trip = self.get_object()
+        assign_trip_driver(trip, driver_id=request.data.get("driver"), user=request.user)
+        trip = self.get_queryset().get(pk=trip.pk)
+        return Response(TripDetailSerializer(trip).data)
+
+    @action(detail=True, methods=["post"], url_path="roster-add")
+    def roster_add(self, request, pk=None):
+        self._require_staff()
+        trip = self.get_object()
+        student, stop = add_student_to_trip(
+            trip,
+            student_id=request.data.get("student"),
+            user=request.user,
+            stop_id=request.data.get("stop_id"),
+        )
+        return Response(
+            {
+                "ok": True,
+                "student_id": str(student.id),
+                "stop_id": str(stop.id),
+                "stop_name": stop.name,
+                "student_count": trip.route.student_count,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="roster-remove")
+    def roster_remove(self, request, pk=None):
+        self._require_staff()
+        trip = self.get_object()
+        student = remove_student_from_trip(trip, student_id=request.data.get("student"), user=request.user)
+        trip.route.refresh_from_db()
+        return Response({"ok": True, "student_id": str(student.id), "student_count": trip.route.student_count})
+
     @action(detail=True, methods=["post"], url_path="simulate-step")
     def simulate_step(self, request, pk=None):
         """Dev-only interpolated GPS step along the route polyline."""
@@ -229,79 +372,34 @@ class TripViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="alert-guardians")
     def alert_guardians(self, request, pk=None):
-        """Dispatcher-initiated emergency alert: accident, breakdown, running very late, or other.
+        """Staff or the assigned driver: accident, breakdown, running late, or other.
 
-        Creates an OperationalAlert (shows up in the dispatcher alert feed),
-        an Incident for accident/breakdown/other (real operational log entry
-        — running_late is communication-only), and a Notification for every
-        verified guardian of a student on this route.
+        Creates an OperationalAlert (dispatcher feed), an Incident for
+        accident/breakdown/other, and a Notification for every verified
+        guardian of a student on this route.
         """
         trip = self.get_object()
-        if request.user.role not in STAFF:
-            raise RouteWiseError("Only dispatchers can send guardian alerts.", code="FORBIDDEN", status_code=403)
-
-        alert_type = request.data.get("alert_type")
-        spec = GUARDIAN_ALERT_TYPES.get(alert_type)
-        if not spec:
+        user = request.user
+        assigned_driver = user.role == UserRole.DRIVER and trip.driver and trip.driver.user_id == user.id
+        if user.role not in STAFF and not assigned_driver:
             raise RouteWiseError(
-                f"alert_type must be one of: {', '.join(GUARDIAN_ALERT_TYPES)}.", code="INVALID_REQUEST"
-            )
-        severity = request.data.get("severity") or spec["default_severity"]
-        if severity not in {"warning", "critical"}:
-            raise RouteWiseError("severity must be 'warning' or 'critical'.", code="INVALID_REQUEST")
-
-        message = (request.data.get("message") or "").strip()
-        title = f"{spec['title']} — {trip.route.route_code}"
-        body = message or (
-            f"Dispatch has an update on your child's bus ({trip.route.route_code}). "
-            "Please check the app for details."
-        )
-
-        incident = None
-        if spec["incident_type"] is not None:
-            incident = Incident.objects.create(
-                trip=trip,
-                type=spec["incident_type"],
-                severity=Incident.Severity.CRITICAL if severity == "critical" else Incident.Severity.HIGH,
-                description=body,
-                created_by=request.user,
+                "Only dispatchers or the assigned driver can send guardian alerts.",
+                code="FORBIDDEN",
+                status_code=403,
             )
 
-        alert = OperationalAlert.objects.create(
-            district=trip.district,
-            trip=trip,
-            alert_type=f"manual_{alert_type}",
-            title=title,
-            message=body,
-            severity=OperationalAlert.Severity.CRITICAL if severity == "critical" else OperationalAlert.Severity.WARNING,
-        )
-
-        guardians_notified = notify_guardians_for_trip(
+        result = send_guardian_trip_alert(
             trip,
-            title=title,
-            body=body,
-            event_type="alert.guardian",
-            payload={"alert_id": str(alert.id), "trip_id": str(trip.id), "alert_type": alert_type},
-            bypass_preferences=spec["bypass_preferences"],
+            alert_type=request.data.get("alert_type"),
+            message=request.data.get("message") or "",
+            severity=request.data.get("severity"),
+            created_by=user,
         )
-
-        from apps.notifications.services import notify_roles
-
-        notify_roles(
-            trip.district,
-            ["dispatcher", "planner", "district_admin"],
-            title,
-            body,
-            "alert.created",
-            {"alert_id": str(alert.id), "trip_id": str(trip.id)},
-        )
-        broadcast_event(trip, "alert.created", {"alert_id": str(alert.id), "title": title})
-
         return Response(
             {
-                "alert": AlertSerializer(alert).data,
-                "incident_id": str(incident.id) if incident else None,
-                "guardians_notified": guardians_notified,
+                "alert": AlertSerializer(result.alert).data,
+                "incident_id": str(result.incident.id) if result.incident else None,
+                "guardians_notified": result.guardians_notified,
             },
             status=201,
         )
@@ -434,8 +532,13 @@ class GuardianViewSet(viewsets.ViewSet):
             trip = Trip.objects.filter(route=route, service_date=today).first()
             if trip:
                 event, _ = StopEvent.objects.get_or_create(trip=trip, route_stop=stop)
+                marker = f"[absent:{link.student_id}]"
+                if marker in (event.notes or ""):
+                    return Response(
+                        {"ok": True, "student_id": str(link.student_id), "scope": scope, "already": True}
+                    )
                 event.absent_count = (event.absent_count or 0) + 1
-                extra = f" Guardian marked {link.student.first_name} absent ({scope})."
+                extra = f" Guardian marked {link.student.first_name} absent ({scope}). {marker}"
                 if note:
                     extra += f" Note: {note}"
                 event.notes = (event.notes or "") + extra

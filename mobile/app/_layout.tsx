@@ -10,8 +10,11 @@ import { useCallback, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "../src/auth/AuthProvider";
 import { SplashWipe } from "../src/components/brand/SplashWipe";
+import { installUiFonts } from "../src/installUiFonts";
 import { DistrictLiveProvider } from "../src/live/DistrictLiveProvider";
 import "../src/notifications/push";
+
+installUiFonts();
 
 const qc = new QueryClient();
 
@@ -46,6 +49,8 @@ function BootGate({ fontsLoaded }: { fontsLoaded: boolean }) {
       <Stack.Screen name="index" />
       <Stack.Screen name="welcome" />
       <Stack.Screen name="login" />
+      <Stack.Screen name="register" />
+      <Stack.Screen name="staff" />
       <Stack.Screen name="(guardian)" />
       <Stack.Screen name="driver" />
     </Stack>

@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   Bus,
+  ClipboardList,
   GitCompare,
   LayoutDashboard,
   LogOut,
@@ -17,29 +18,46 @@ import {
   Waypoints,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
+import { useDemoGuideOptional } from "../../demo/DemoGuideProvider";
 import { ROLE_LABEL, type Role } from "../../types";
 import { Logo } from "../brand/Logo";
+import { DemoGuideChip, DemoGuideRail } from "../demo/DemoGuideRail";
 import { LiveOpsProvider } from "../../live/LiveOpsProvider";
 import { NotificationBell } from "./NotificationBell";
 
-const links: { to: string; label: string; icon: typeof Map; roles?: Role[]; group: number }[] = [
-  { to: "/app/live", label: "Live demo", icon: Activity, group: 0 },
-  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, group: 0, roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
-  { to: "/app/drive", label: "Route guide", icon: Navigation, group: 0 },
-  { to: "/app/onboarding", label: "Onboarding", icon: Upload, group: 0, roles: ["platform_admin", "district_admin", "planner"] },
-  { to: "/app/schools", label: "Schools", icon: School, group: 1, roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
-  { to: "/app/students", label: "Students", icon: Users, group: 1, roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
-  { to: "/app/fleet", label: "Fleet", icon: Bus, group: 1, roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
-  { to: "/app/drivers", label: "Drivers", icon: Users, group: 1, roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
-  { to: "/app/planner", label: "Route planner", icon: Waypoints, group: 2, roles: ["platform_admin", "district_admin", "planner"] },
-  { to: "/app/compare", label: "Compare plans", icon: GitCompare, group: 2, roles: ["platform_admin", "district_admin", "planner"] },
-  { to: "/app/twin", label: "Digital twin", icon: Sparkles, group: 2, roles: ["platform_admin", "district_admin", "planner"] },
-  { to: "/app/dispatch", label: "Dispatcher", icon: Radio, group: 2, roles: ["platform_admin", "district_admin", "dispatcher"] },
-  { to: "/app/admin", label: "Administration", icon: Settings, group: 2, roles: ["platform_admin", "district_admin"] },
+const links: {
+  to: string;
+  label: string;
+  icon: typeof Map;
+  roles?: Role[];
+  group: "tour" | "ops" | "setup";
+  step?: number;
+}[] = [
+  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, group: "tour", step: 1, roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
+  { to: "/app/planner", label: "Route planner", icon: Waypoints, group: "tour", step: 2, roles: ["platform_admin", "district_admin", "planner"] },
+  { to: "/app/compare", label: "Compare plans", icon: GitCompare, group: "tour", step: 3, roles: ["platform_admin", "district_admin", "planner"] },
+  { to: "/app/twin", label: "Digital twin", icon: Sparkles, group: "tour", step: 4, roles: ["platform_admin", "district_admin", "planner"] },
+  { to: "/app/live", label: "Live demo", icon: Activity, group: "tour", step: 5 },
+  { to: "/app/dispatch", label: "Dispatcher", icon: Radio, group: "ops", roles: ["platform_admin", "district_admin", "dispatcher"] },
+  { to: "/app/assignments", label: "Assignments", icon: ClipboardList, group: "ops", roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
+  { to: "/app/drive", label: "Route guide", icon: Navigation, group: "ops" },
+  { to: "/app/onboarding", label: "Onboarding", icon: Upload, group: "setup", roles: ["platform_admin", "district_admin", "planner"] },
+  { to: "/app/schools", label: "Schools", icon: School, group: "setup", roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
+  { to: "/app/students", label: "Students", icon: Users, group: "setup", roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
+  { to: "/app/fleet", label: "Fleet", icon: Bus, group: "setup", roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
+  { to: "/app/drivers", label: "Drivers", icon: Users, group: "setup", roles: ["platform_admin", "district_admin", "planner", "dispatcher"] },
+  { to: "/app/admin", label: "Administration", icon: Settings, group: "setup", roles: ["platform_admin", "district_admin"] },
 ];
+
+const GROUP_LABEL: Record<(typeof links)[number]["group"], string> = {
+  tour: "Walkthrough",
+  ops: "Also try",
+  setup: "Roster & settings",
+};
 
 export function AppShell() {
   const { user, logout } = useAuth();
+  const guide = useDemoGuideOptional();
   const nav = useNavigate();
   const loc = useLocation();
   const immersive = loc.pathname.startsWith("/app/drive/");
@@ -49,23 +67,28 @@ export function AppShell() {
   const isFamilyOrDriver = user?.role === "guardian" || user?.role === "driver";
 
   return (
-    <div className="min-h-screen flex bg-canvas text-ink">
+    <div className="flex h-dvh max-w-[100vw] overflow-hidden bg-canvas text-ink">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:p-2 bg-white z-50">
         Skip to content
       </a>
 
-      <aside className="w-[264px] shrink-0 flex flex-col bg-paper border-r border-line">
-        <div className="h-[72px] px-5 flex items-center border-b border-line">
+      <aside className="sticky top-0 flex h-dvh w-[264px] shrink-0 flex-col overflow-hidden bg-paper border-r border-line">
+        <div className="flex h-[72px] shrink-0 items-center border-b border-line px-5">
           <Logo size={26} showTagline />
         </div>
 
-        <nav className="flex-1 px-3 py-3.5 space-y-0.5 overflow-y-auto" aria-label="Primary">
+        <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-3 py-3.5" aria-label="Primary">
           {visible.map((l, i) => {
             const Icon = l.icon;
             const prev = visible[i - 1];
+            const showLabel = !prev || prev.group !== l.group;
             return (
               <div key={l.to}>
-                {prev && prev.group !== l.group && <div className="mx-3 my-2.5 h-px bg-slate-soft" />}
+                {showLabel && (
+                  <p className={`${i ? "mt-3.5" : ""} mb-1.5 px-3 text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted`}>
+                    {GROUP_LABEL[l.group]}
+                  </p>
+                )}
                 <NavLink
                   to={l.to}
                   className={({ isActive }) =>
@@ -95,7 +118,12 @@ export function AppShell() {
                         className={isActive ? "text-route" : "text-muted group-hover:text-ink"}
                         aria-hidden
                       />
-                      {l.label}
+                      <span className="min-w-0 flex-1 truncate">{l.label}</span>
+                      {l.step != null && (
+                        <span className={`tabular-nums text-[10.5px] font-bold ${isActive ? "text-route" : "text-muted"}`}>
+                          {l.step}
+                        </span>
+                      )}
                     </>
                   )}
                 </NavLink>
@@ -104,12 +132,46 @@ export function AppShell() {
           })}
         </nav>
 
-        <div className="p-3 border-t border-line">
+        <div className="shrink-0 border-t border-line p-3">
           <div className="rounded-[10px] border border-line bg-canvas px-3.5 py-3">
             <div className="text-[13.5px] font-semibold text-ink truncate">
               {user?.first_name} {user?.last_name}
             </div>
             <div className="text-slate text-[11.5px] mt-0.5">{user ? ROLE_LABEL[user.role] : ""}</div>
+            {guide?.available && (
+              <div className="mt-2.5 flex flex-wrap gap-1">
+                {isFamilyOrDriver ? (
+                  <button
+                    type="button"
+                    className="text-[11px] font-bold text-route hover:underline"
+                    onClick={() => void guide.switchAccount("district_admin")}
+                    disabled={guide.switching}
+                  >
+                    Back to admin
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="text-[11px] font-bold text-route hover:underline"
+                      onClick={() => void guide.switchAccount("guardian")}
+                      disabled={guide.switching}
+                    >
+                      View as family
+                    </button>
+                    <span className="text-muted">·</span>
+                    <button
+                      type="button"
+                      className="text-[11px] font-bold text-route hover:underline"
+                      onClick={() => void guide.switchAccount("driver")}
+                      disabled={guide.switching}
+                    >
+                      View as driver
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <button
               className="mt-2.5 inline-flex items-center gap-1.5 text-slate hover:text-ink text-[11.5px] font-semibold transition-colors"
               onClick={async () => {
@@ -123,12 +185,13 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-[72px] bg-paper border-b border-line flex items-center justify-between gap-4 px-7 shrink-0 sticky top-0 z-40">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="z-40 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-line bg-paper px-7">
           <div className="flex items-center gap-3 min-w-0">
             <Map size={16} className="text-route shrink-0" aria-hidden />
             <span className="font-semibold text-[14.5px] text-ink truncate">{user?.district_name ?? "District console"}</span>
             <span className="badge-info">Demo</span>
+            {guide?.available && <DemoGuideChip />}
           </div>
           <div className="flex items-center gap-2.5">
             {!isFamilyOrDriver && (
@@ -151,8 +214,12 @@ export function AppShell() {
           </div>
         </header>
 
-        <main id="main" className={immersive ? "flex-1 p-0 overflow-hidden" : "flex-1 p-7 overflow-auto"}>
+        <main
+          id="main"
+          className={immersive ? "min-h-0 flex-1 overflow-hidden p-0" : "min-h-0 flex-1 overflow-auto overscroll-contain p-7"}
+        >
           <LiveOpsProvider>
+            {!immersive && <DemoGuideRail />}
             <Outlet />
           </LiveOpsProvider>
         </main>

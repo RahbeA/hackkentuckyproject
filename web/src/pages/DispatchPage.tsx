@@ -107,6 +107,11 @@ export function DispatchPage() {
       <PageHeader
         title="Dispatcher console"
         subtitle="At-risk trips sorted first. Start the live demo so parents and drivers see the same buses."
+        actions={
+          <Link className="btn-secondary" to="/app/assignments">
+            Edit drivers &amp; rosters
+          </Link>
+        }
       />
 
       {actionErr && (
@@ -202,6 +207,7 @@ export function DispatchPage() {
             late_probability: number;
             is_simulated: boolean;
             school_name?: string;
+            driver_name?: string | null;
             route_safety_context?: SafetyContext;
           }) => (
             <article key={t.id} className="card card-body flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -226,7 +232,7 @@ export function DispatchPage() {
                 </div>
                 <div className="text-sm text-slate mt-1 capitalize">
                   {t.school_name && `${t.school_name} · `}
-                  {t.status.replace("_", " ")} · {Math.round(t.current_delay_seconds / 60)} min delay
+                  {t.driver_name || "No driver"} · {t.status.replace("_", " ")} · {Math.round(t.current_delay_seconds / 60)} min delay
                   {t.is_simulated ? " · sim GPS" : ""}
                 </div>
               </div>

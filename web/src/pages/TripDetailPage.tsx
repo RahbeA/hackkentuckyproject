@@ -75,10 +75,19 @@ export function TripDetailPage() {
             {trip.is_simulated ? " · Simulated GPS" : ""}
           </p>
         </div>
-        <Link className="btn-route" to={`/app/drive/${trip.id}`}>
-          <Navigation size={16} /> Open route guide
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          {!isGuardian ? (
+            <Link className="btn-secondary" to="/app/assignments">
+              Edit assignments
+            </Link>
+          ) : null}
+          <Link className="btn-route" to={`/app/drive/${trip.id}`}>
+            <Navigation size={16} /> Open route guide
+          </Link>
+        </div>
       </div>
+
+      {!isGuardian ? <TripAssignmentPanel tripId={trip.id} currentDriver={trip.driver} driverName={trip.driver_name} /> : null}
 
       <div className="card overflow-hidden">
         <div className="px-5 pt-5 pb-2 flex flex-wrap items-center justify-between gap-3">
@@ -298,6 +307,140 @@ export function TripDetailPage() {
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+function TripAssignmentPanel({
+  tripId,
+  currentDriver,
+  driverName,
+}: {
+  tripId: string;
+  currentDriver?: string | null;
+  driverName?: string | null;
+}) {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [addId, setAddId] = useState("");
+  const { data: board } = useQuery({
+    queryKey: ["assignment-board"],
+    queryFn: async () => (await api.get("/trips/assignment-board/")).data,
+  });
+  const { data: driversPage } = useQuery({
+    queryKey: ["drivers", "assign"],
+    queryFn: async () => (await api.get("/drivers/", { params: { page_size: 100, is_active: true } })).data,
+  });
+  const row = (board?.trips || []).find((t: { id: string }) => t.id === tripId);
+  const drivers = driversPage?.results || [];
+  const unassigned = board?.unassigned || [];
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["assignment-board"] });
+    qc.invalidateQueries({ queryKey: ["trip", tripId] });
+    qc.invalidateQueries({ queryKey: ["trips"] });
+  };
+  const setDriver = useMutation({
+    mutationFn: (driver: string | null) => api.post(`/trips/${tripId}/assign-driver/`, { driver }),
+    onSuccess: () => {
+      setErr(null);
+      invalidate();
+    },
+    onError: (e) => setErr(errorMessage(e)),
+  });
+  const addRider = useMutation({
+    mutationFn: (student: string) => api.post(`/trips/${tripId}/roster-add/`, { student }),
+    onSuccess: () => {
+      setErr(null);
+      setAddId("");
+      invalidate();
+    },
+    onError: (e) => setErr(errorMessage(e)),
+  });
+  const removeRider = useMutation({
+    mutationFn: (student: string) => api.post(`/trips/${tripId}/roster-remove/`, { student }),
+    onSuccess: () => {
+      setErr(null);
+      invalidate();
+    },
+    onError: (e) => setErr(errorMessage(e)),
+  });
+
+  return (
+    <div className="card card-body space-y-4">
+      <h2 className="section-title !mb-0">Driver and roster</h2>
+      {err ? <p className="text-sm text-bad">{err}</p> : null}
+      <label className="grid max-w-sm gap-1.5">
+        <span className="label">Driver</span>
+        <select
+          className="select"
+          aria-label="Assigned driver"
+          value={row?.driver || currentDriver || ""}
+          disabled={setDriver.isPending}
+          onChange={(e) => setDriver.mutate(e.target.value || null)}
+        >
+          <option value="">{driverName && !row?.driver ? driverName : "Unassigned"}</option>
+          {drivers.map((d: { id: string; first_name: string; last_name: string }) => (
+            <option key={d.id} value={d.id}>
+              {d.first_name} {d.last_name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <ul className="divide-y divide-line rounded-xl border border-line">
+        {(row?.students || []).length === 0 ? (
+          <li className="px-3 py-2.5 text-sm text-slate">No students on this run.</li>
+        ) : (
+          (row?.students || []).map((s: { id: string; first_name: string; last_name: string; stop_name: string }) => (
+            <li key={s.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <span className="text-sm">
+                <span className="font-semibold">{s.first_name} {s.last_name}</span>
+                <span className="text-slate"> · {s.stop_name}</span>
+              </span>
+              <button
+                type="button"
+                className="text-[12px] font-semibold text-bad hover:underline"
+                onClick={() => removeRider.mutate(s.id)}
+              >
+                Remove
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+      <div className="flex flex-wrap items-end gap-2">
+        <select className="select max-w-sm flex-1" value={addId} onChange={(e) => setAddId(e.target.value)} aria-label="Student to add">
+          <option value="">Add a student…</option>
+          {unassigned.length ? (
+            <optgroup label="Unassigned">
+              {unassigned.map((s: { id: string; first_name: string; last_name: string }) => (
+                <option key={s.id} value={s.id}>
+                  {s.first_name} {s.last_name}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
+          {(() => {
+            const movers = (board?.trips || [])
+              .filter((t: { id: string }) => t.id !== tripId)
+              .flatMap((t: { route_code: string; students: { id: string; first_name: string; last_name: string }[] }) =>
+                t.students.map((s) => ({ ...s, from: t.route_code })),
+              );
+            return movers.length ? (
+              <optgroup label="On another run">
+                {movers.map((s: { id: string; first_name: string; last_name: string; from: string }) => (
+                  <option key={`${s.id}-${s.from}`} value={s.id}>
+                    {s.first_name} {s.last_name} · from {s.from}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null;
+          })()}
+        </select>
+        <button type="button" className="btn-primary" disabled={!addId || addRider.isPending} onClick={() => addRider.mutate(addId)}>
+          Add
+        </button>
+      </div>
     </div>
   );
 }

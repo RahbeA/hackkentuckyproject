@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors } from "../../theme";
+import { colors, uiFont } from "../../theme";
 import { BackButton } from "./BackButton";
 
 export function ScreenHeader({
@@ -36,11 +36,11 @@ export function ScreenHeader({
       {back ? <BackButton /> : left}
       {title ? (
         <View style={{ minWidth: 0, flex: 1 }}>
-          <Text style={{ fontSize: 15, fontWeight: "600", color: colors.ink }} numberOfLines={1}>
+          <Text style={{ ...uiFont, fontSize: 15, fontWeight: "600", color: colors.ink }} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
-            <Text style={{ marginTop: 1, fontSize: 11.5, color: colors.muted }} numberOfLines={1}>
+            <Text style={{ ...uiFont, marginTop: 1, fontSize: 11.5, color: colors.muted }} numberOfLines={1}>
               {subtitle}
             </Text>
           ) : null}

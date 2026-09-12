@@ -6,6 +6,7 @@ import { Avatar } from "../../src/components/ui/Avatar";
 import { Button } from "../../src/components/ui/Button";
 import { ScreenHeader } from "../../src/components/ui/ScreenHeader";
 import { childName, initials } from "../../src/format";
+import { DEMO_MODE } from "../../src/config";
 import { colors, fonts } from "../../src/theme";
 
 export default function LinkRider() {
@@ -24,7 +25,8 @@ export default function LinkRider() {
           Enter the code from your district
         </Text>
         <Text style={{ marginTop: 9, fontSize: 14, lineHeight: 22, color: colors.muted }}>
-          Your transportation office issues one code per rider. Linking a rider does not change their route.
+          Your transportation office issues one rider code per child (AVA001), not the district join code. Linking a
+          rider does not change their route.
         </Text>
 
         <View style={{ marginTop: 24, position: "relative" }}>
@@ -134,11 +136,12 @@ export default function LinkRider() {
           }}
         >
           <Text style={{ flex: 1, fontSize: 12.5, lineHeight: 20, color: colors.muted }}>
-            Codes expire after use. Demo codes look like AVA001 — the first three letters of the rider's name plus their
-            student number. If a code does not work, contact the transportation office.
+            Codes stay valid so another guardian can link the same rider. Demo codes look like AVA001 — the first three
+            letters of the rider's name plus their student number. If a code does not work, contact the transportation
+            office.
           </Text>
         </View>
-        {process.env.EXPO_PUBLIC_DEMO_MODE === "true" ? (
+        {DEMO_MODE ? (
           <Pressable onPress={() => setCode("MIA003")} style={{ marginTop: 12 }}>
             <Text style={{ fontSize: 13, fontWeight: "600", color: colors.primary }}>Fill demo code MIA003</Text>
           </Pressable>

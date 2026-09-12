@@ -45,14 +45,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       async login(email, password) {
-        const { data } = await api.post("/auth/login/", { email, password });
+        const { data } = await api.post("/auth/login/", { email: email.trim().toLowerCase(), password });
         setAccessToken(data.tokens.access);
         setRefresh(data.tokens.refresh);
         setUser(data.user);
         return data.user as User;
       },
       async register(input) {
-        const { data } = await api.post("/auth/register/", input);
+        const { data } = await api.post("/auth/register/", {
+          ...input,
+          email: input.email.trim().toLowerCase(),
+        });
         setAccessToken(data.tokens.access);
         setRefresh(data.tokens.refresh);
         setUser(data.user);

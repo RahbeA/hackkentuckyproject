@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Bus, Check, Circle, Navigation, Radio, Square } from "lucide-react";
+import { Navigate, useNavigate } from "react-router-dom";
+import { Bus, Check, Circle, Compass, Navigation, Radio, Square } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { LogoMark } from "../components/brand/Logo";
+import { useDemoGuideOptional } from "../demo/DemoGuideProvider";
 import { WORKSPACE_HOME, type WorkspaceId } from "../types";
 
 const WORKSPACES: {
@@ -31,26 +32,33 @@ const WORKSPACES: {
   },
   {
     id: "driver",
-    label: "Driver",
-    body: "Assigned route, stop details, and dispatch messages.",
+    label: "Driver (this account)",
+    body: "Staff preview of the route guide. To see a real driver, use View as driver after you enter.",
     icon: Bus,
   },
   {
     id: "guardian",
-    label: "Family",
-    body: "Arrival estimates and updates for your own riders.",
+    label: "Family (this account)",
+    body: "Staff preview of Live. To see only Ava, use View as family after you enter.",
     icon: Circle,
   },
 ];
 
 export function ChooseWorkspacePage() {
   const { user, logout } = useAuth();
+  const guide = useDemoGuideOptional();
   const nav = useNavigate();
   const [selected, setSelected] = useState<WorkspaceId>(
     user?.role === "planner" || user?.role === "dispatcher" || user?.role === "driver" || user?.role === "guardian"
       ? user.role
       : "district_admin",
   );
+  if (user?.role === "platform_admin") {
+    return <Navigate to="/app/dashboard" replace />;
+  }
+  if (guide?.active) {
+    return <Navigate to={guide.step.path} replace />;
+  }
 
   const label = WORKSPACES.find((w) => w.id === selected)?.label ?? "District admin";
 
@@ -72,8 +80,21 @@ export function ChooseWorkspacePage() {
           Where would you like to start?
         </h1>
         <p className="mt-3 max-w-[34em] text-base leading-relaxed text-slate">
-          Your account has access to more than one view. Pick one now — you can switch at any time.
+          You are signed in as district staff. District admin is the start of the walkthrough. Family and Driver below
+          are previews — they do not switch accounts.
         </p>
+        {guide?.available && (
+          <button
+            type="button"
+            className="btn-primary mt-5 !min-h-12 !px-[26px] !text-[15px]"
+            onClick={() => {
+              guide.start("dashboard");
+              nav("/app/dashboard", { replace: true });
+            }}
+          >
+            <Compass size={16} /> Start the 6-step walkthrough
+          </button>
+        )}
 
         <div className="mt-8 grid gap-3.5 sm:grid-cols-2">
           {WORKSPACES.map((w) => {

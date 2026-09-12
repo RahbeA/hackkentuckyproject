@@ -6,6 +6,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { LoginPage } from "../src/pages/LoginPage";
 import { AuthProvider } from "../src/auth/AuthProvider";
+import { DemoGuideProvider } from "../src/demo/DemoGuideProvider";
+import { GUIDE_STEPS } from "../src/demo/steps";
 import { ROLE_HOME, afterSignInPath } from "../src/types";
 import { DispatchPage } from "../src/pages/DispatchPage";
 import { PlannerPage } from "../src/pages/PlannerPage";
@@ -34,7 +36,9 @@ function wrap(ui: ReactElement, route = "/") {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[route]}>
-        <AuthProvider>{ui}</AuthProvider>
+        <AuthProvider>
+          <DemoGuideProvider>{ui}</DemoGuideProvider>
+        </AuthProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -60,15 +64,20 @@ describe("auth", () => {
   it("renders login and demo accounts", async () => {
     vi.stubEnv("VITE_DEMO_MODE", "true");
     wrap(<LoginPage />);
-    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("button", { name: /Open a demo account/i }));
-    expect(await screen.findByText("District admin")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Start the demo" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Start walkthrough/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign in with email instead/i })).toBeInTheDocument();
+  });
+
+  it("walkthrough has six ordered screens", () => {
+    expect(GUIDE_STEPS.map((s) => s.id)).toEqual(["dashboard", "planner", "compare", "twin", "live", "family"]);
   });
 
   it("shows error on failed login", async () => {
     vi.mocked(api.post).mockRejectedValue({ response: { data: { error: { message: "Invalid email or password." } } } });
     wrap(<LoginPage />);
+    const emailToggle = await screen.findByRole("button", { name: /Sign in with email instead/i });
+    await userEvent.click(emailToggle);
     await userEvent.type(screen.getByLabelText("Email"), "x@y.com");
     await userEvent.type(screen.getByLabelText("Password"), "badpassw0rd");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -80,6 +89,7 @@ describe("auth", () => {
     expect(ROLE_HOME.planner).toBe("/app/planner");
     expect(ROLE_HOME.district_admin).toBe("/app/dashboard");
     expect(afterSignInPath("district_admin", { pickWorkspace: true })).toBe("/choose-workspace");
+    expect(afterSignInPath("platform_admin", { pickWorkspace: true })).toBe("/app/dashboard");
     expect(afterSignInPath("district_admin", { newDistrict: true })).toBe("/app/onboarding");
   });
 });

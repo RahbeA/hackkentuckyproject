@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useChildren, useEtas, useHistory, useMarkAbsent } from "../../../src/api/hooks";
+import { useAbsentToday, useChildren, useEtas, useHistory, useMarkAbsent } from "../../../src/api/hooks";
 import { AbsenceSheet } from "../../../src/components/AbsenceSheet";
 import { Avatar } from "../../../src/components/ui/Avatar";
 import { Chip } from "../../../src/components/ui/Chip";
@@ -17,11 +17,13 @@ export default function RiderDetail() {
   const { data: etas } = useEtas();
   const { data: history } = useHistory();
   const absent = useMarkAbsent();
+  const { data: absentIds } = useAbsentToday();
   const [sheet, setSheet] = useState(false);
   const child = (children || []).find((c) => c.id === id);
   const eta = (etas || []).find((e) => e.student_id === id);
   const name = child ? childName(child) : eta?.student_first_name || "Rider";
   const riding = eta && eta.status !== "unassigned" && eta.status !== "completed";
+  const marked = Boolean(id && absentIds?.includes(id));
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -57,29 +59,29 @@ export default function RiderDetail() {
           <Chip label={riding ? "Riding" : "Scheduled"} tone={riding ? "success" : "neutral"} />
         </View>
 
-        <Text style={label}>Assigned stops</Text>
+        <Text style={label}>Morning pickup</Text>
         <View style={card}>
           <StopRow
             up
-            title={`Morning · ${eta?.stop_name || "Pickup stop"}`}
-            subtitle={`${eta?.route_code || "Bus"} · pickup ${formatClock(eta?.scheduled_pickup)}`}
-          />
-          <StopRow
-            title={`Afternoon · ${eta?.stop_name || "Drop-off stop"}`}
-            subtitle={`${eta?.route_code || "Bus"} · drop-off after last bell`}
+            title={eta?.stop_name || "Pickup stop"}
+            subtitle={`${eta?.route_code || "Bus"} · ${formatClock(eta?.p50_eta || eta?.scheduled_pickup)}`}
           />
         </View>
 
         <Text style={label}>This week</Text>
         <View style={[card, { padding: 18 }]}>
-          <WeekStrip history={history || []} />
+          <WeekStrip history={history || []} scheduled={eta?.scheduled_pickup} />
           <Text style={{ marginTop: 14, fontSize: 12.5, lineHeight: 19, color: colors.muted }}>
-            Actual pickup times for the mornings your rider was on the bus.
+            Morning runs this week. Off means the trip was canceled. Delay is from the recorded trip, not a clock.
           </Text>
         </View>
 
         <View style={{ marginTop: 18, gap: 10 }}>
-          <Action icon="calendar-outline" label="Report an absence" onPress={() => setSheet(true)} />
+          <Action
+            icon="calendar-outline"
+            label={marked ? `${eta?.student_first_name || "Rider"} marked absent` : "Report an absence"}
+            onPress={() => (marked ? undefined : setSheet(true))}
+          />
           <Action
             icon="chatbubble-outline"
             label={`Message the office about ${eta?.student_first_name || "this rider"}`}
@@ -146,7 +148,13 @@ function Action({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap
   );
 }
 
-function WeekStrip({ history }: { history: { service_date: string; delay_seconds: number; status: string }[] }) {
+function WeekStrip({
+  history,
+  scheduled,
+}: {
+  history: { service_date: string; delay_seconds: number; status: string }[];
+  scheduled?: string | null;
+}) {
   const days = ["M", "T", "W", "T", "F"];
   const today = new Date();
   const monday = new Date(today);
@@ -160,6 +168,19 @@ function WeekStrip({ history }: { history: { service_date: string; delay_seconds
         const row = history.find((h) => String(h.service_date).slice(0, 10) === key);
         const isToday = date.toDateString() === today.toDateString();
         const future = date > today;
+        const canceled = row?.status === "canceled" || row?.status === "cancelled";
+        const late = (row?.delay_seconds || 0) >= 180;
+        const label = future
+          ? "—"
+          : !row
+            ? "—"
+            : canceled
+              ? "Off"
+              : late
+                ? `+${Math.round((row.delay_seconds || 0) / 60)}m`
+                : formatClock(scheduled) === "—"
+                  ? "On"
+                  : formatClock(scheduled);
         return (
           <View key={`${d}-${i}`} style={{ flex: 1, alignItems: "center" }}>
             <Text style={{ fontSize: 11, fontWeight: "600", color: isToday ? colors.ink : colors.faint }}>{d}</Text>
@@ -171,9 +192,9 @@ function WeekStrip({ history }: { history: { service_date: string; delay_seconds
                 borderRadius: 9,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: future ? colors.surface : row ? colors.successSoft : colors.hairline,
+                backgroundColor: future ? colors.surface : canceled ? colors.hairline : row ? colors.successSoft : colors.hairline,
                 borderWidth: isToday ? 1.5 : 1,
-                borderColor: isToday ? colors.primary : row ? "rgba(5,150,105,.2)" : colors.border,
+                borderColor: isToday ? colors.primary : late ? "rgba(217,119,6,.35)" : row && !canceled ? "rgba(5,150,105,.2)" : colors.border,
                 borderStyle: future ? "dashed" : "solid",
               }}
             >
@@ -181,10 +202,10 @@ function WeekStrip({ history }: { history: { service_date: string; delay_seconds
                 style={{
                   fontSize: 11,
                   fontWeight: "700",
-                  color: future ? "#CBD5E1" : isToday ? colors.primary : row ? colors.success : colors.faint,
+                  color: future ? "#CBD5E1" : canceled ? colors.faint : late ? colors.warn : isToday ? colors.primary : row ? colors.success : colors.faint,
                 }}
               >
-                {future ? "—" : row ? (row.status === "cancelled" ? "Off" : formatClock(row.service_date + "T07:42:00")) : "—"}
+                {label}
               </Text>
             </View>
           </View>

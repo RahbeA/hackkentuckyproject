@@ -195,8 +195,8 @@ export function LandingPage() {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [audience, setAudience] = useState<AudienceKey>("districts");
-  const primaryTo = user ? ROLE_HOME[user.role] : "/login";
-  const primaryLabel = user ? "Open the console" : "Explore Demo";
+  const primaryTo = user ? ROLE_HOME[user.role] : "/login?guide=1";
+  const primaryLabel = user ? "Open the console" : "Start guided demo";
   const aud = AUDIENCES[audience];
 
   return (
@@ -211,6 +211,12 @@ export function LandingPage() {
             className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-7 md:flex"
             aria-label="Primary"
           >
+            <Link to="/pitch" className="text-sm font-semibold text-route transition-colors hover:text-ink">
+              Pitch
+            </Link>
+            <a href="#guide" className="text-sm font-medium text-slate transition-colors hover:text-ink">
+              For judges
+            </a>
             <a href="#platform" className="text-sm font-medium text-slate transition-colors hover:text-ink">
               Platform
             </a>
@@ -219,9 +225,6 @@ export function LandingPage() {
             </a>
             <a href="#how" className="text-sm font-medium text-slate transition-colors hover:text-ink">
               How It Works
-            </a>
-            <a href="#mobile" className="text-sm font-medium text-slate transition-colors hover:text-ink">
-              Mobile
             </a>
           </nav>
           <div className="relative z-10 hidden items-center gap-4 md:flex">
@@ -248,6 +251,12 @@ export function LandingPage() {
         </div>
         {menuOpen && (
           <div className="flex flex-col gap-1 border-t border-line bg-paper px-6 pb-6 pt-4 md:hidden">
+            <Link to="/pitch" onClick={() => setMenuOpen(false)} className="border-b border-slate-soft py-3 text-base font-semibold text-route">
+              Pitch deck
+            </Link>
+            <a href="#guide" onClick={() => setMenuOpen(false)} className="border-b border-slate-soft py-3 text-base font-medium">
+              For judges
+            </a>
             <a href="#platform" onClick={() => setMenuOpen(false)} className="border-b border-slate-soft py-3 text-base font-medium">
               Platform
             </a>
@@ -256,9 +265,6 @@ export function LandingPage() {
             </a>
             <a href="#how" onClick={() => setMenuOpen(false)} className="border-b border-slate-soft py-3 text-base font-medium">
               How It Works
-            </a>
-            <a href="#mobile" onClick={() => setMenuOpen(false)} className="border-b border-slate-soft py-3 text-base font-medium">
-              Mobile
             </a>
             {!user && (
               <Link to="/login" onClick={() => setMenuOpen(false)} className="py-3 text-base font-medium">
@@ -298,12 +304,15 @@ export function LandingPage() {
               Bring routes, bus tracking, and transportation updates together so districts stay coordinated and families
               stay informed.
             </p>
-            <div className="mt-10 flex flex-wrap gap-3">
+            <p className="mt-4 max-w-[32em] text-[13.5px] font-semibold text-ink">
+              Judges: Jefferson Demo Schools is already seeded. No CSV upload. About six minutes.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
               <Link to={primaryTo} className="btn-primary !py-3.5 !px-6 text-[15px] shadow-float">
                 {primaryLabel} <ArrowRight size={16} />
               </Link>
-              <a href="#how" className="btn-secondary !py-3.5 !px-6 text-[15px]">
-                See How It Works
+              <a href="#guide" className="btn-secondary !py-3.5 !px-6 text-[15px]">
+                Read the 6 steps
               </a>
             </div>
           </div>
@@ -316,6 +325,49 @@ export function LandingPage() {
           <span>Explore</span>
           <span className="dart-hero-scroll-line block h-8 w-px bg-gradient-to-b from-route to-transparent" />
         </a>
+      </section>
+
+      {/* ── Judge walkthrough ── */}
+      <section id="guide" className="border-b border-line bg-paper">
+        <div className="mx-auto max-w-6xl px-6 py-24">
+          <div className="max-w-[44em]">
+            <div className="text-xs font-bold uppercase tracking-[0.1em] text-route">For hackathon judges</div>
+            <h2 className="mt-3.5 font-display text-[clamp(28px,3.2vw,42px)] font-bold leading-tight tracking-tight">
+              A 6-step walkthrough. We will not be in the room.
+            </h2>
+            <p className="mt-4 text-[17px] leading-relaxed text-slate">
+              Press Start guided demo, then follow the blue coach at the top of every screen. All names, GPS, and models
+              are fictional.
+            </p>
+          </div>
+          <ol className="mt-11 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { n: "1", title: "District board", body: "Six KPIs and a live fleet map. Data is already loaded." },
+              { n: "2", title: "Route planner", body: "A reliability plan is published. Optional: generate Fastest." },
+              { n: "3", title: "Compare plans", body: "Mileage, vehicles, and on-time chance side by side." },
+              { n: "4", title: "Rainy-morning test", body: "Run the digital twin. Read the interpretation card." },
+              { n: "5", title: "Start the buses", body: "Press Start live demo. Click a route to follow it." },
+              { n: "6", title: "Family view", body: "Next switches you to a parent account. You only see Ava." },
+            ].map((s) => (
+              <li key={s.n} className="rounded-2xl border border-line bg-canvas p-6">
+                <div className="font-display text-[28px] font-bold tabular-nums text-route">{s.n}</div>
+                <h3 className="mt-2 font-display text-[18px] font-bold tracking-tight">{s.title}</h3>
+                <p className="mt-2 text-[14px] leading-relaxed text-slate">{s.body}</p>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-10 flex flex-wrap items-center gap-4">
+            <Link to={primaryTo} className="btn-primary !py-3.5 !px-6 text-[15px]">
+              {primaryLabel} <ArrowRight size={16} />
+            </Link>
+            <Link to="/pitch" className="btn-secondary !py-3.5 !px-6 text-[15px]">
+              Open the pitch deck
+            </Link>
+            <p className="text-[13.5px] text-slate">
+              Password for every demo account is <span className="font-semibold text-ink">DemoPass123!</span>
+            </p>
+          </div>
+        </div>
       </section>
 
       {/* ── Audiences ── */}
@@ -886,7 +938,8 @@ export function LandingPage() {
             <div className="mt-3.5 flex flex-col gap-2.5 text-sm text-slate">
               <Link to="/login" className="hover:text-ink">Sign In</Link>
               <Link to="/register" className="hover:text-ink">Create Account</Link>
-              <Link to="/login" className="hover:text-ink">Explore Demo</Link>
+              <Link to="/login?guide=1" className="hover:text-ink">Start guided demo</Link>
+              <Link to="/pitch" className="hover:text-ink">Pitch deck</Link>
             </div>
           </div>
           <div className="min-w-0">

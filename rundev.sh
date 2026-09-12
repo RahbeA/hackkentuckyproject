@@ -61,7 +61,6 @@ if [[ -z "$PYTHON" ]]; then
   echo "On Windows, the 'py' launcher is also supported."
   exit 1
 fi
-need docker
 need node
 need npm
 
@@ -92,6 +91,19 @@ PY
   fi
 }
 
+USE_DOCKER=1
+if ! command -v docker >/dev/null 2>&1; then
+  if port_in_use 5432 && port_in_use 6379; then
+    USE_DOCKER=0
+    echo "Docker not found — using existing Postgres/Redis on localhost."
+  else
+    echo "Missing required command: docker"
+    echo "Install Docker Desktop: https://docs.docker.com/get-docker/"
+    echo "Or start local Postgres (5432) and Redis (6379) and re-run."
+    exit 1
+  fi
+fi
+
 if [[ ! -f "$ROOT/.env" ]]; then
   cp "$ROOT/.env.example" "$ROOT/.env"
   echo "Created .env from .env.example"
@@ -112,8 +124,12 @@ for p in 5432 6379 8000 5173; do
   fi
 done
 
-echo "==> Starting PostgreSQL and Redis"
-docker compose -f "$ROOT/infrastructure/docker-compose.yml" --env-file "$ROOT/.env" up -d
+if [[ "$USE_DOCKER" -eq 1 ]]; then
+  echo "==> Starting PostgreSQL and Redis (Docker)"
+  docker compose -f "$ROOT/infrastructure/docker-compose.yml" --env-file "$ROOT/.env" up -d
+else
+  echo "==> Using local PostgreSQL and Redis"
+fi
 
 bash "$ROOT/scripts/wait_for_postgres.sh" localhost "${POSTGRES_PORT:-5432}" "${POSTGRES_USER:-routewise}" "${POSTGRES_DB:-routewise}"
 bash "$ROOT/scripts/wait_for_redis.sh"

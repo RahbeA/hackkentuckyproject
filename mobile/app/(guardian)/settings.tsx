@@ -51,7 +51,7 @@ export default function Settings() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScreenHeader back title="Settings" />
+      <ScreenHeader title="Settings" />
       <ScrollView contentContainerStyle={{ padding: 22, paddingBottom: 36 }}>
         <View
           style={{

@@ -131,6 +131,17 @@ def generate_plan(plan: RoutePlan, vehicle_ids=None, driver_ids=None, weights=No
             school=school,
             is_active=True,
             eligibility=Student.Eligibility.ELIGIBLE,
+        )
+    )
+    from apps.imports.services import ensure_boarding_stops
+
+    ensure_boarding_stops(district, students)
+    students = list(
+        Student.objects.filter(
+            district=district,
+            school=school,
+            is_active=True,
+            eligibility=Student.Eligibility.ELIGIBLE,
         ).prefetch_related("stop_assignments__bus_stop")
     )
     vehicles_qs = Vehicle.objects.filter(district=district, is_active=True, status__in=["active", "spare"])
@@ -152,7 +163,6 @@ def generate_plan(plan: RoutePlan, vehicle_ids=None, driver_ids=None, weights=No
             "Insufficient capacity",
             "Insufficient wheelchair capacity",
             "No available driver",
-            "No approved stop assignment for one or more eligible students.",
             "Missing coordinates for one or more students.",
             "The school is missing coordinates.",
             "No eligible students were found for this school.",

@@ -3,7 +3,7 @@ import { useEtas, useNotificationPrefs, useNotifications } from "../api/hooks";
 import { useDistrictLive } from "../live/DistrictLiveProvider";
 import { mergeEta } from "../live/mergeEta";
 import { useRideLiveActivity } from "../live/useRideLiveActivity";
-import { fallbackRiders, ridersFromEtas, syncWidgetSnapshot } from "../widgets/snapshot";
+import { ridersFromEtas, syncWidgetSnapshot } from "../widgets/snapshot";
 import { ensureNotificationSetup, requestPermission } from "./push";
 import { useGuardianAlerts, useNotificationRouting } from "./useGuardianAlerts";
 
@@ -39,7 +39,7 @@ export function GuardianLive() {
 
   useEffect(() => {
     const riders = ridersFromEtas(etas);
-    void syncWidgetSnapshot(riders.length ? riders : fallbackRiders());
+    if (riders.length) void syncWidgetSnapshot(riders);
   }, [etas]);
 
   return null;

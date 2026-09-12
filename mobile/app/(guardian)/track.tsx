@@ -1,7 +1,7 @@
 import { useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { useEtas, useGuardianTrip, useMarkAbsent } from "../../src/api/hooks";
+import { useAbsentToday, useEtas, useGuardianTrip, useMarkAbsent } from "../../src/api/hooks";
 import { useDistrictLive } from "../../src/live/DistrictLiveProvider";
 import { mergeEta } from "../../src/live/mergeEta";
 import { AbsenceSheet } from "../../src/components/AbsenceSheet";
@@ -26,8 +26,9 @@ export default function Track() {
   }, [etas, rider, positions]);
   const { data: trip } = useGuardianTrip(selected?.student_id);
   const absent = useMarkAbsent();
+  const { data: absentIds } = useAbsentToday();
   const [sheet, setSheet] = useState(false);
-  const [marked, setMarked] = useState(false);
+  const marked = Boolean(selected && absentIds?.includes(selected.student_id));
 
   const late = selected ? !selected.on_time && selected.delay_seconds >= 180 : false;
   const path = (trip?.path || []).map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
@@ -37,10 +38,10 @@ export default function Track() {
     longitude: Number(s.longitude),
   }));
   const myStop = stops.find((s) => s.sequence === (selected?.my_stop_sequence ?? trip?.my_stop_sequence));
-  const bus =
+  const liveBus =
     selected?.latitude != null && selected?.longitude != null
       ? { latitude: Number(selected.latitude), longitude: Number(selected.longitude) }
-      : path[0];
+      : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -55,13 +56,19 @@ export default function Track() {
       />
       <ScrollView>
         <LiveMap
-          bus={bus}
+          bus={liveBus}
           heading={selected?.heading}
+          progress={selected?.progress}
           path={path}
           stops={stops}
           myStopId={myStop?.id}
           title={selected ? `${selected.student_first_name} · ${selected.route_code || "Bus"}` : "Live map"}
         />
+        {!liveBus ? (
+          <Text style={{ paddingHorizontal: 22, paddingTop: 10, fontSize: 13, color: colors.muted }}>
+            Waiting for the bus to roll. The route is shown; the pin appears when the district starts the live demo.
+          </Text>
+        ) : null}
         <View style={{ padding: 22, paddingBottom: 36 }}>
           {selected?.trip_id ? (
             <View style={{ marginBottom: 22 }}>
@@ -90,7 +97,9 @@ export default function Track() {
               <Button
                 label={marked ? `${selected.student_first_name} marked absent` : `Mark ${selected.student_first_name} absent`}
                 variant={marked ? "secondary" : "primary"}
-                onPress={() => setSheet(true)}
+                onPress={() => {
+                  if (!marked) setSheet(true);
+                }}
               />
               {marked ? (
                 <Text style={{ fontSize: 12.5, lineHeight: 19, color: colors.muted }}>
@@ -114,12 +123,7 @@ export default function Track() {
           onConfirm={({ note, scope }) =>
             absent.mutate(
               { student_id: selected.student_id, note, scope },
-              {
-                onSuccess: () => {
-                  setMarked(true);
-                  setSheet(false);
-                },
-              },
+              { onSuccess: () => setSheet(false) },
             )
           }
         />

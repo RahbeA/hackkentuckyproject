@@ -15,6 +15,12 @@ export function ComparePage() {
     if (!a && list[0]) setA(list[0].id);
     if (!b && list[1]) setB(list[1].id);
   }, [list, a, b]);
+  useEffect(() => {
+    if (!a || !b || compare.data || compare.isPending || compare.isError) return;
+    compare.mutate();
+    // Auto-run once two plans are selected so judges are not staring at empty selects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a, b]);
   const compare = useMutation({
     mutationFn: async () => (await api.post("/route-plans/compare/", { plan_a: a, plan_b: b })).data,
     onSuccess: () => setErr(null),
@@ -33,7 +39,10 @@ export function ComparePage() {
   ];
   return (
     <div className="page-shell">
-      <PageHeader title="Plan comparison" subtitle="Side-by-side metrics for two route plans." />
+      <PageHeader
+        title="Plan comparison"
+        subtitle="Two generated plans, side by side. Press Compare if the table has not appeared yet."
+      />
       {list.length < 2 && (
         <p className="text-slate text-sm">
           You need at least two generated route plans to compare. Generate one from{" "}

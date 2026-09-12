@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useAuth } from "./auth/AuthProvider";
 import { AppShell } from "./components/layout/AppShell";
 import { WordmarkWipe } from "./components/brand/WordmarkWipe";
+import { DemoGuideProvider } from "./demo/DemoGuideProvider";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -16,6 +17,7 @@ import { OnboardingPage } from "./pages/OnboardingPage";
 import { PlannerPage } from "./pages/PlannerPage";
 import { ComparePage } from "./pages/ComparePage";
 import { TwinPage } from "./pages/TwinPage";
+import { AssignmentsPage } from "./pages/AssignmentsPage";
 import { DispatchPage } from "./pages/DispatchPage";
 import { TripDetailPage } from "./pages/TripDetailPage";
 import { DrivePage } from "./pages/DrivePage";
@@ -24,6 +26,7 @@ import { StudentDetailPage } from "./pages/StudentDetailPage";
 import { AdminPage } from "./pages/AdminPage";
 import { LivePage } from "./pages/LivePage";
 import { PrivacyPage } from "./pages/PrivacyPage";
+import { PitchDeckPage } from "./pages/pitch/PitchDeckPage";
 import type { Role } from "./types";
 
 const STAFF_ROLES: Role[] = ["platform_admin", "district_admin", "planner", "dispatcher"];
@@ -47,12 +50,14 @@ function Guard({ children, roles }: { children: ReactNode; roles?: Role[] }) {
 
 export function App() {
   return (
-    <Routes>
+    <DemoGuideProvider>
+      <Routes>
       {/* Public routes */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/pitch" element={<PitchDeckPage />} />
       <Route
         path="/choose-workspace"
         element={
@@ -162,6 +167,14 @@ export function App() {
             </Guard>
           }
         />
+        <Route
+          path="assignments"
+          element={
+            <Guard roles={STAFF_ROLES}>
+              <AssignmentsPage />
+            </Guard>
+          }
+        />
         <Route path="drive" element={<DrivePage />} />
         <Route path="drive/:id" element={<DrivePage />} />
         <Route path="trips/:id" element={<TripDetailPage />} />
@@ -177,6 +190,7 @@ export function App() {
 
       {/* Unknown paths fall back to the landing page */}
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </DemoGuideProvider>
   );
 }

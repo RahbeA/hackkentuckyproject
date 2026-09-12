@@ -11,8 +11,9 @@ import {
 } from "react";
 import { getAccess } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
+import { WS_URL } from "../config";
 
-const WS_BASE = process.env.EXPO_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+const WS_BASE = WS_URL;
 
 export type LivePosition = {
   tripId: string;
@@ -26,6 +27,7 @@ export type LivePosition = {
   lateProbability: number;
   p50Eta: string | null;
   routeCode: string;
+  nextStopName?: string | null;
   status?: string;
   updatedAt: number;
 };
@@ -100,17 +102,20 @@ export function DistrictLiveProvider({ children }: { children: ReactNode }) {
           lat,
           lng,
           heading: Number(p.heading || 0) || 0,
-          progress: Number(p.progress || 0) || 0,
-          currentStopSequence: Number(p.current_stop_sequence || 0) || 0,
+          progress: Number(p.progress ?? 0) || 0,
+          currentStopSequence: Number(p.current_stop_sequence ?? 0),
           stopCount: Number(p.stop_count || 0) || 0,
           delaySeconds: Number(p.delay_seconds || 0) || 0,
           lateProbability: Number(p.late_probability || 0) || 0,
           p50Eta: (p.p50_eta as string) || null,
           routeCode: (p.route_code as string) || pending.current[msg.trip_id]?.routeCode || "",
+          nextStopName: (p.next_stop_name as string) || pending.current[msg.trip_id]?.nextStopName || null,
           status: pending.current[msg.trip_id]?.status,
           updatedAt: Date.now(),
         };
-        if (!flushTimer.current) flushTimer.current = setTimeout(flushPositions, 280);
+        if (!flushTimer.current) {
+          flushTimer.current = setTimeout(flushPositions, 16);
+        }
         return;
       }
       if (msg.event === "trip.status.updated") {

@@ -52,7 +52,7 @@ export function TwinPage() {
     <div className="page-shell">
       <PageHeader
         title="Digital twin"
-        subtitle="Monte Carlo of fictional school mornings. Not a certified reliability study."
+        subtitle="Rain and traffic are pre-filled. Press Run stress test, then read the interpretation. Not a certified study."
       />
 
       {list.length === 0 && (

@@ -91,12 +91,10 @@ def test_no_approved_stop(district, school, depot, planner, driver_user):
         longitude=-85.72,
     )
     plan = RoutePlan.objects.create(district=district, name="stop", school=school, created_by=planner)
-    try:
-        generate_plan(plan)
-        assert False
-    except InfeasibleRouteError as exc:
-        joined = " ".join(exc.details["reasons"]).lower()
-        assert "stop" in joined
+    generate_plan(plan)
+    plan.refresh_from_db()
+    assert plan.status == RoutePlan.Status.GENERATED
+    assert plan.routes.count() >= 1
 
 
 def test_feasible_small_plan(district, school, depot, planner, driver_user):

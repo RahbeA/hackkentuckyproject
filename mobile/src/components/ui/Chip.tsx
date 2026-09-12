@@ -1,5 +1,5 @@
 import { Text, View } from "react-native";
-import { colors } from "../../theme";
+import { colors, uiFont } from "../../theme";
 
 export function Chip({
   label,
@@ -28,7 +28,7 @@ export function Chip({
       }}
     >
       <View style={{ width: 6, height: 6, borderRadius: 99, backgroundColor: map.fg }} />
-      <Text style={{ color: map.fg, fontSize: 11.5, fontWeight: "700" }}>{label}</Text>
+      <Text style={{ ...uiFont, color: map.fg, fontSize: 11.5, fontWeight: "700" }}>{label}</Text>
     </View>
   );
 }
