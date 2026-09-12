@@ -1,0 +1,4 @@
+school_id,name,school_type,address,latitude,longitude,morning_bell,dismissal,is_active
+LOU-EL,Cherokee Elementary,elementary,"1200 Cherokee Rd, Louisville, KY 40204",38.2412,-85.7185,08:15,14:45,true
+LOU-MS,Highlands Middle,middle,"2100 Bardstown Rd, Louisville, KY 40205",38.2298,-85.7079,07:50,14:50,true
+LOU-HS,Atherton High,high,"3000 Dundee Rd, Louisville, KY 40205",38.2339,-85.6989,07:40,14:35,true

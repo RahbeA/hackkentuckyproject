@@ -1,0 +1,11 @@
+stop_id,name,address,latitude,longitude,approved,accessibility,safety_notes
+LOU-ST-01,Cherokee & Willow,"1300 Willow Ave, Louisville, KY 40204",38.2419,-85.7205,true,curb_cut,Crossing guard on duty AM
+LOU-ST-02,Highland & Cherokee,"1450 Highland Ave, Louisville, KY 40204",38.2401,-85.7160,true,none,Signalized intersection
+LOU-ST-03,Bardstown & Eastern,"1620 Bardstown Rd, Louisville, KY 40205",38.2352,-85.7118,true,none,Bus pull-off lane
+LOU-ST-04,Baxter & Broadway,"900 Baxter Ave, Louisville, KY 40204",38.2470,-85.7295,true,curb_cut,"High-traffic corner, board curbside only"
+LOU-ST-05,Grinstead Commons,"2000 Grinstead Dr, Louisville, KY 40204",38.2438,-85.7089,true,none,Good sight lines
+LOU-ST-06,Douglass Loop,"2233 Bardstown Rd, Louisville, KY 40205",38.2265,-85.7062,true,curb_cut,Loop turnaround
+LOU-ST-07,Dundee & Norris,"2900 Dundee Rd, Louisville, KY 40205",38.2338,-85.6975,true,none,Residential corner
+LOU-ST-08,Deer Park,"1800 Deer Park Ave, Louisville, KY 40205",38.2312,-85.7028,true,none,Shaded shelter
+LOU-ST-09,Tyler Park,"1501 Tyler Pkwy, Louisville, KY 40204",38.2379,-85.7241,true,curb_cut,Adjacent to park path
+LOU-ST-10,Rosewood Terrace,"2400 Rosewood Ave, Louisville, KY 40204",38.2229,-85.7139,true,none,Cul-de-sac turnaround

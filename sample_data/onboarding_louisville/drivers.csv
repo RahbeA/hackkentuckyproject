@@ -1,0 +1,5 @@
+employee_id,email,first_name,last_name,phone,license_expiration,endorsements,availability
+LOU-D-01,maya.driver@louisville.demo,Maya,Sullivan,502-555-0101,2027-08-31,"CDL-B,S,P",weekday_am
+LOU-D-02,jordan.driver@louisville.demo,Jordan,Blake,502-555-0102,2026-12-15,"CDL-B,S,P",weekday_am
+LOU-D-03,priya.driver@louisville.demo,Priya,Anand,502-555-0103,2028-03-20,"CDL-B,S",weekday_am
+LOU-D-04,marcus.driver@louisville.demo,Marcus,Reed,502-555-0104,2027-05-10,"CDL-B,S,P",weekday_am

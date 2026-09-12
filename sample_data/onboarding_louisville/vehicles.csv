@@ -1,0 +1,5 @@
+vehicle_number,license_plate,capacity,wheelchair_capacity,vehicle_type,status,depot_name
+LOU-BUS-01,KY-4801,72,0,standard,active,Main Bus Depot
+LOU-BUS-02,KY-4802,72,0,standard,active,Main Bus Depot
+LOU-BUS-03,KY-4803,48,2,accessible,active,Main Bus Depot
+LOU-BUS-04,KY-4804,54,2,accessible,active,Main Bus Depot
