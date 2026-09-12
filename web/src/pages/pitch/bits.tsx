@@ -385,7 +385,7 @@ export function FailureIcon({ kind }: { kind: "data" | "calendar" | "paper" | "a
       {kind === "paper" && (
         <>
           <rect x="10" y="6" width="16" height="22" rx="1.4" {...common} />
-          <rect x="8" y="8" width="16" height="22" rx="1.4" fill="#fff" {...common} />
+          <rect x="8" y="8" width="16" height="22" rx="1.4" {...common} fill="#fff" />
           <path d="M12 15 H20 M12 19 H20 M12 23 H17" {...common} />
         </>
       )}
