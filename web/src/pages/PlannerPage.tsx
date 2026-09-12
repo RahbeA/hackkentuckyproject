@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, Construction, Loader2, Map, Route, ShieldAlert } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, Construction, Loader2, Map, Route, ShieldAlert } from "lucide-react";
 import { api, errorMessage } from "../api/client";
 import { PlanGeneratingScreen } from "../components/brand/PlanGeneratingScreen";
 import { MapPoint, RouteMap } from "../components/maps/RouteMap";
@@ -12,6 +12,18 @@ import { useHazardLayers } from "../hooks/useHazardLayers";
 import type { RiskFactor, SafetyContext } from "../types";
 
 const COLORS = ["#2563EB", "#059669", "#D97706", "#7C3AED", "#DC2626", "#0D9488", "#C2410C"];
+const TRANSFER_COLOR = "#7C3AED";
+
+interface RouteTransfer {
+  id: string;
+  depot_name: string;
+  feeder_route_code: string;
+  trunk_route_code: string;
+  planned_arrival: string;
+  planned_departure: string;
+  buffer_minutes: number;
+  student_count: number;
+}
 
 const STATUS_BADGE: Record<string, string> = {
   published: "badge-good",
@@ -105,8 +117,14 @@ export function PlannerPage() {
     width: 5,
   }));
   const points: MapPoint[] = routes.flatMap(
-    (r: { stops: { id: string; latitude: string; longitude: string; name: string }[] }) =>
-      r.stops.map((s) => ({ id: s.id, lat: Number(s.latitude), lng: Number(s.longitude), label: s.name })),
+    (r: { stops: { id: string; latitude: string; longitude: string; name: string; kind: string }[] }) =>
+      r.stops.map((s) => ({
+        id: s.id,
+        lat: Number(s.latitude),
+        lng: Number(s.longitude),
+        label: s.name,
+        ...(s.kind === "transfer" ? { color: TRANSFER_COLOR, kind: "place" as const } : {}),
+      })),
   );
 
   const { hazardLines, hazardPoints } = useHazardLayers(points, { showCorridors, showConstruction });
@@ -283,7 +301,10 @@ export function PlannerPage() {
                   on_time_probability: number;
                   risk_factors: RiskFactor[];
                   safety_context?: SafetyContext;
-                  stops: { id: string; sequence: number; name: string; student_count: number }[];
+                  is_feeder: boolean;
+                  transfers_out: RouteTransfer[];
+                  transfers_in: RouteTransfer[];
+                  stops: { id: string; sequence: number; name: string; student_count: number; kind: string }[];
                 },
                 i: number,
               ) => (
@@ -292,16 +313,47 @@ export function PlannerPage() {
                     <div className="flex items-center gap-2">
                       <span className="h-3 w-3 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
                       <h3 className="font-bold text-lg">{r.route_code}</h3>
+                      {r.is_feeder && <span className="badge-info">Feeder</span>}
+                      {r.transfers_in.length > 0 && <span className="badge-info">Trunk</span>}
                     </div>
                     <span className="badge-neutral">
                       {r.student_count} students · {(r.on_time_probability * 100).toFixed(0)}% on-time
                     </span>
                   </div>
+
+                  {r.transfers_out.map((t) => (
+                    <p
+                      key={t.id}
+                      className="text-xs flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded-lg"
+                      style={{ background: `${TRANSFER_COLOR}14`, color: TRANSFER_COLOR }}
+                    >
+                      <ArrowRightLeft size={13} />
+                      {t.student_count} students transfer to <strong>{t.trunk_route_code}</strong> at {t.depot_name},
+                      arriving {t.planned_arrival}
+                    </p>
+                  ))}
+                  {r.transfers_in.map((t) => (
+                    <p
+                      key={t.id}
+                      className="text-xs flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded-lg"
+                      style={{ background: `${TRANSFER_COLOR}14`, color: TRANSFER_COLOR }}
+                    >
+                      <ArrowRightLeft size={13} />
+                      Picks up {t.student_count} students from <strong>{t.feeder_route_code}</strong> at{" "}
+                      {t.depot_name}, no earlier than {t.planned_departure}
+                    </p>
+                  ))}
+
                   <ol className="text-sm mt-3 space-y-1 ml-1">
                     {r.stops.map((s) => (
-                      <li key={s.id} className="flex gap-2 text-slate">
+                      <li
+                        key={s.id}
+                        className="flex gap-2"
+                        style={s.kind === "transfer" ? { color: TRANSFER_COLOR, fontWeight: 600 } : undefined}
+                      >
                         <span className="text-muted font-mono text-xs w-5">{s.sequence}.</span>
-                        <span>
+                        <span className={s.kind === "transfer" ? "" : "text-slate"}>
+                          {s.kind === "transfer" && <ArrowRightLeft size={12} className="inline -mt-0.5 mr-1" />}
                           {s.name}
                           {s.student_count ? ` (${s.student_count})` : ""}
                         </span>

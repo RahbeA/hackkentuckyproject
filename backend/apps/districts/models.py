@@ -90,6 +90,11 @@ class Depot(TenantModel):
     opens_at = models.TimeField(null=True, blank=True)
     closes_at = models.TimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    is_transfer_hub = models.BooleanField(
+        default=False,
+        help_text="Students from feeder-flagged stops (BusStop.transfer_hub) are dropped here and "
+        "board a second bus that continues to school. See apps.routing.models.RouteTransfer.",
+    )
 
     class Meta:
         ordering = ["name"]

@@ -173,30 +173,55 @@ def maybe_raise_delay_alert(trip: Trip) -> OperationalAlert | None:
         "alert.created",
         {"alert_id": str(alert.id), "trip_id": str(trip.id)},
     )
-    guardians_for_trip(trip, alert)
+    notify_guardians_for_trip(
+        trip,
+        title="Bus running behind",
+        body="Your child's bus is running behind the scheduled pickup. This is a synthetic demo alert.",
+        event_type="alert.created",
+        payload={"trip_id": str(trip.id), "alert_id": str(alert.id)},
+        preference_key="delay",
+    )
     broadcast_event(trip, "alert.created", {"alert_id": str(alert.id), "title": alert.title})
     return alert
 
 
-def guardians_for_trip(trip: Trip, alert: OperationalAlert):
-    from apps.accounts.models import GuardianStudentLink, UserRole
+def notify_guardians_for_trip(
+    trip: Trip,
+    title: str,
+    body: str,
+    event_type: str,
+    payload: dict | None = None,
+    bypass_preferences: bool = False,
+    preference_key: str = "emergency",
+) -> int:
+    """Notifies every verified guardian of a student on this trip's route.
+
+    Gated on `link.notification_preferences[preference_key]` (default True)
+    unless bypass_preferences — used for accident/breakdown alerts, which are
+    safety-critical enough that a muted preference shouldn't silence them.
+    Returns the number of guardians notified.
+    """
+    from apps.accounts.models import GuardianStudentLink
     from apps.notifications.models import Notification
     from apps.routing.models import RouteStopStudent
 
     student_ids = RouteStopStudent.objects.filter(route_stop__route=trip.route).values_list("student_id", flat=True)
     links = GuardianStudentLink.objects.filter(student_id__in=student_ids, is_verified=True).select_related("guardian")
+    count = 0
     for link in links:
         prefs = link.notification_preferences or {}
-        if prefs.get("delay", True) is False:
+        if not bypass_preferences and prefs.get(preference_key, True) is False:
             continue
         Notification.objects.create(
             district=trip.district,
             user=link.guardian,
-            title="Bus running behind",
-            body="Your child's bus is running behind the scheduled pickup. This is a synthetic demo alert.",
-            event_type="alert.created",
-            payload={"trip_id": str(trip.id), "student_id": str(link.student_id)},
+            title=title,
+            body=body,
+            event_type=event_type,
+            payload={**(payload or {}), "student_id": str(link.student_id)},
         )
+        count += 1
+    return count
 
 
 def ingest_gps(trip: Trip, lat, lng, heading=0, speed=0, accuracy=8, is_simulated=False, timestamp=None) -> GPSPosition:

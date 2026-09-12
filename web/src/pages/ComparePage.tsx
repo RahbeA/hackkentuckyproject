@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { GitCompare } from "lucide-react";
-import { api } from "../api/client";
+import { Link } from "react-router-dom";
+import { api, errorMessage } from "../api/client";
 import { PageHeader } from "../components/ui/PageHeader";
 
 export function ComparePage() {
@@ -9,12 +10,15 @@ export function ComparePage() {
   const list = plans?.results || [];
   const [a, setA] = useState("");
   const [b, setB] = useState("");
+  const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     if (!a && list[0]) setA(list[0].id);
     if (!b && list[1]) setB(list[1].id);
   }, [list, a, b]);
   const compare = useMutation({
     mutationFn: async () => (await api.post("/route-plans/compare/", { plan_a: a, plan_b: b })).data,
+    onSuccess: () => setErr(null),
+    onError: (e) => setErr(errorMessage(e)),
   });
   const rows = [
     ["Mileage (km)", "mileage_km"],
@@ -30,6 +34,20 @@ export function ComparePage() {
   return (
     <div className="page-shell">
       <PageHeader title="Plan comparison" subtitle="Side-by-side metrics for two route plans." />
+      {list.length < 2 && (
+        <p className="text-slate text-sm">
+          You need at least two generated route plans to compare. Generate one from{" "}
+          <Link className="link" to="/app/planner">
+            Route planner
+          </Link>
+          .
+        </p>
+      )}
+      {err && (
+        <p role="alert" className="text-bad bg-red-50 rounded-xl p-3 border border-red-100 text-sm">
+          {err}
+        </p>
+      )}
       <div className="card card-body flex gap-3 flex-wrap items-end">
         <label className="flex-1 min-w-[180px]">
           <span className="label">Plan A</span>

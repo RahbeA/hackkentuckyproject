@@ -15,6 +15,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
+    filterset_fields = ("is_read", "event_type")
 
     def get_queryset(self):
         return Notification.objects.filter(user=self.request.user).order_by("-created_at")

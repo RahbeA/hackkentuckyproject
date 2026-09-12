@@ -86,6 +86,15 @@ class BusStop(TenantModel):
         help_text="Auto-computed from Louisville Metro/LOJIC open data (apps.geodata): high-injury-corridor "
         "proximity and whether a marked crossing or signal is nearby. Recomputed on every save.",
     )
+    transfer_hub = models.ForeignKey(
+        "districts.Depot",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="feeder_stops",
+        help_text="If set, students at this stop ride a feeder route to this hub and transfer to a "
+        "second bus for the rest of the trip, instead of riding straight to school.",
+    )
 
     class Meta:
         unique_together = ("district", "stop_code")

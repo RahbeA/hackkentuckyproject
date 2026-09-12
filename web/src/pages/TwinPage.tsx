@@ -2,7 +2,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { FlaskConical, Loader2 } from "lucide-react";
-import { api } from "../api/client";
+import { Link } from "react-router-dom";
+import { api, errorMessage } from "../api/client";
 import { PageHeader } from "../components/ui/PageHeader";
 import { StatCard } from "../components/ui/StatCard";
 
@@ -29,9 +30,14 @@ export function TwinPage() {
     if (first && !form.route_plan) setForm((f) => ({ ...f, route_plan: first.id, compare_plan: second?.id || "" }));
   }, [list, form.route_plan]);
   const [runId, setRunId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: async () => (await api.post("/stress-tests/", form)).data,
-    onSuccess: (d) => setRunId(d.id),
+    onSuccess: (d) => {
+      setRunId(d.id);
+      setErr(null);
+    },
+    onError: (e) => setErr(errorMessage(e)),
   });
   const { data: run } = useQuery({
     queryKey: ["stress", runId],
@@ -48,6 +54,26 @@ export function TwinPage() {
         title="Digital twin"
         subtitle="Monte Carlo of fictional school mornings. Not a certified reliability study."
       />
+
+      {list.length === 0 && (
+        <p className="text-slate text-sm">
+          You need a generated route plan first. Generate one from{" "}
+          <Link className="link" to="/app/planner">
+            Route planner
+          </Link>
+          .
+        </p>
+      )}
+      {err && (
+        <p role="alert" className="text-bad bg-red-50 rounded-xl p-3 border border-red-100 text-sm">
+          {err}
+        </p>
+      )}
+      {run?.status === "failed" && (
+        <p role="alert" className="text-bad bg-red-50 rounded-xl p-3 border border-red-100 text-sm">
+          Stress test failed to complete. Try again or pick a different plan.
+        </p>
+      )}
 
       <div className="card card-body grid md:grid-cols-3 gap-4">
         <label>

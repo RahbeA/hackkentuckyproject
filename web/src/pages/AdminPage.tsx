@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound } from "lucide-react";
-import { api } from "../api/client";
+import { api, errorMessage } from "../api/client";
+import { LoadingBlock } from "../components/ui/LoadingBlock";
 import { PageHeader } from "../components/ui/PageHeader";
 
 function JoinCodeCard({ code, districtName }: { code: string; districtName: string }) {
@@ -51,96 +52,169 @@ function JoinCodeCard({ code, districtName }: { code: string; districtName: stri
 
 export function AdminPage() {
   const qc = useQueryClient();
-  const { data: districts } = useQuery({ queryKey: ["districts"], queryFn: async () => (await api.get("/districts/")).data });
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const { data: districts, isLoading: districtsLoading } = useQuery({
+    queryKey: ["districts"],
+    queryFn: async () => (await api.get("/districts/")).data,
+  });
   const district = districts?.results?.[0];
-  const { data: policy } = useQuery({
+  const { data: policy, isLoading: policyLoading } = useQuery({
     queryKey: ["policy", district?.id],
     enabled: Boolean(district?.id),
     queryFn: async () => (await api.get("/policies/")).data,
   });
-  const { data: users } = useQuery({ queryKey: ["users"], queryFn: async () => (await api.get("/users/")).data });
-  const { data: models } = useQuery({ queryKey: ["ml"], queryFn: async () => (await api.get("/model-artifacts/metrics/")).data });
-  const { data: audit } = useQuery({ queryKey: ["audit"], queryFn: async () => (await api.get("/audit-logs/")).data });
+  const { data: users, isLoading: usersLoading } = useQuery({
+    queryKey: ["users"],
+    queryFn: async () => (await api.get("/users/")).data,
+  });
+  const { data: models, isLoading: modelsLoading } = useQuery({
+    queryKey: ["ml"],
+    queryFn: async () => (await api.get("/model-artifacts/metrics/")).data,
+  });
+  const { data: audit, isLoading: auditLoading } = useQuery({
+    queryKey: ["audit"],
+    queryFn: async () => (await api.get("/audit-logs/")).data,
+  });
   const pol = policy?.results?.[0];
   const save = useMutation({
     mutationFn: (body: Record<string, number>) => api.patch(`/policies/${pol.id}/`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["policy"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["policy"] });
+      setSaveErr(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    },
+    onError: (e) => setSaveErr(errorMessage(e)),
   });
   return (
     <div className="page-shell">
       <PageHeader title="Administration" subtitle="District settings, users, ML metrics, and audit trail." />
 
-      {district && (
-        <section className="card card-body">
-          <h2 className="font-bold text-ink">{district.name}</h2>
-          <p className="text-sm text-slate mt-1">
-            {district.state} · {district.timezone} · {district.contact_email}
-          </p>
-        </section>
+      {districtsLoading ? (
+        <LoadingBlock rows={1} />
+      ) : (
+        district && (
+          <section className="card card-body">
+            <h2 className="font-bold text-ink">{district.name}</h2>
+            <p className="text-sm text-slate mt-1">
+              {district.state} · {district.timezone} · {district.contact_email}
+            </p>
+          </section>
+        )
       )}
 
       {district?.join_code && <JoinCodeCard code={district.join_code} districtName={district.name} />}
 
-      {pol && (
-        <section className="card card-body space-y-3">
-          <h2 className="font-bold text-ink">Transportation policy</h2>
-          <label className="label">Max ride minutes</label>
-          <input
-            className="input max-w-xs"
-            type="number"
-            defaultValue={pol.max_student_ride_minutes}
-            onBlur={(e) => save.mutate({ max_student_ride_minutes: Number(e.target.value) })}
-          />
-        </section>
+      {policyLoading ? (
+        <LoadingBlock rows={1} />
+      ) : (
+        pol && (
+          <section className="card card-body space-y-3">
+            <h2 className="font-bold text-ink">Transportation policy</h2>
+            <label className="label">Max ride minutes</label>
+            <input
+              className="input max-w-xs"
+              type="number"
+              min={1}
+              defaultValue={pol.max_student_ride_minutes}
+              onBlur={(e) => {
+                const value = Number(e.target.value);
+                if (!Number.isFinite(value) || value <= 0) {
+                  setSaveErr("Max ride minutes must be a positive number.");
+                  return;
+                }
+                save.mutate({ max_student_ride_minutes: value });
+              }}
+            />
+            {saveErr && <p className="text-sm text-bad">{saveErr}</p>}
+            {saved && <p className="text-sm text-good">Saved.</p>}
+          </section>
+        )
       )}
 
       <section className="card card-body">
         <h2 className="font-bold text-ink mb-4">Users</h2>
-        <div className="data-table-wrap !shadow-none !border-0">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Email</th>
-                <th>Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(users?.results || []).map((u: { id: string; email: string; role: string }) => (
-                <tr key={u.id}>
-                  <td className="font-medium">{u.email}</td>
-                  <td>
-                    <span className="badge-neutral capitalize">{u.role.replace("_", " ")}</span>
-                  </td>
+        {usersLoading ? (
+          <LoadingBlock rows={4} />
+        ) : (users?.results || []).length === 0 ? (
+          <p className="text-slate text-sm">No users yet.</p>
+        ) : (
+          <div className="data-table-wrap !shadow-none !border-0">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Role</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {(users?.results || []).map((u: { id: string; email: string; role: string }) => (
+                  <tr key={u.id}>
+                    <td className="font-medium">{u.email}</td>
+                    <td>
+                      <span className="badge-neutral capitalize">{u.role.replace("_", " ")}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {typeof users?.count === "number" && users.count > (users?.results || []).length && (
+              <p className="text-xs text-slate mt-2">
+                Showing {(users?.results || []).length} of {users.count} users.
+              </p>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="card card-body">
         <h2 className="font-bold text-ink">Model metrics</h2>
-        <p className="text-sm text-warn mt-2 mb-4 bg-amber-50 rounded-xl px-3 py-2 border border-amber-100">{models?.disclaimer}</p>
-        {(models?.models || []).map((m: { id: string; model_type: string; metrics: Record<string, unknown> }) => (
-          <div key={m.id} className="border-t border-navy/[0.06] py-4 first:border-0 first:pt-0">
-            <div className="font-semibold text-sm">{m.model_type}</div>
-            <pre className="text-xs overflow-auto mt-2 bg-canvas rounded-xl p-3 text-slate">{JSON.stringify(m.metrics, null, 2)}</pre>
-          </div>
-        ))}
+        {modelsLoading ? (
+          <LoadingBlock rows={2} />
+        ) : (
+          <>
+            {models?.disclaimer && (
+              <p className="text-sm text-warn mt-2 mb-4 bg-amber-50 rounded-xl px-3 py-2 border border-amber-100">
+                {models.disclaimer}
+              </p>
+            )}
+            {(models?.models || []).length === 0 && <p className="text-slate text-sm">No trained models yet.</p>}
+            {(models?.models || []).map((m: { id: string; model_type: string; metrics: Record<string, unknown> }) => (
+              <div key={m.id} className="border-t border-navy/[0.06] py-4 first:border-0 first:pt-0">
+                <div className="font-semibold text-sm capitalize">{m.model_type.replace(/_/g, " ")}</div>
+                <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 mt-2">
+                  {Object.entries(m.metrics || {}).map(([key, value]) => (
+                    <div key={key}>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate">{key.replace(/_/g, " ")}</dt>
+                      <dd className="text-sm font-semibold text-ink tabular-nums">
+                        {typeof value === "number" ? value.toLocaleString(undefined, { maximumFractionDigits: 3 }) : String(value)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ))}
+          </>
+        )}
       </section>
 
       <section className="card card-body">
         <h2 className="font-bold text-ink mb-4">Activity log</h2>
-        <ul className="space-y-2 text-sm">
-          {(audit?.results || []).slice(0, 12).map((a: { id: string; action: string; actor_email: string; created_at: string }) => (
-            <li key={a.id} className="flex gap-3 py-2 border-b border-navy/[0.04] last:border-0">
-              <span className="text-muted text-xs tabular-nums shrink-0 w-36">{a.created_at}</span>
-              <span className="font-medium">{a.actor_email}</span>
-              <span className="text-slate">{a.action}</span>
-            </li>
-          ))}
-          {(audit?.results || []).length === 0 && <li className="text-slate">No audit events yet.</li>}
-        </ul>
+        {auditLoading ? (
+          <LoadingBlock rows={4} />
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {(audit?.results || []).slice(0, 12).map((a: { id: string; action: string; actor_email: string; created_at: string }) => (
+              <li key={a.id} className="flex gap-3 py-2 border-b border-navy/[0.04] last:border-0">
+                <span className="text-muted text-xs tabular-nums shrink-0 w-36">{a.created_at}</span>
+                <span className="font-medium">{a.actor_email}</span>
+                <span className="text-slate">{a.action}</span>
+              </li>
+            ))}
+            {(audit?.results || []).length === 0 && <li className="text-slate">No audit events yet.</li>}
+          </ul>
+        )}
       </section>
     </div>
   );

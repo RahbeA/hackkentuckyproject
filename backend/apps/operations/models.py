@@ -63,6 +63,7 @@ class StopEvent(TimeStampedUUIDModel):
 
 class Incident(TimeStampedUUIDModel):
     class Type(models.TextChoices):
+        ACCIDENT = "accident", "Accident"
         BREAKDOWN = "breakdown", "Breakdown"
         TRAFFIC = "traffic", "Traffic"
         WEATHER = "weather", "Weather"

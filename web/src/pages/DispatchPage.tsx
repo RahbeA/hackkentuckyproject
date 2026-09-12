@@ -17,6 +17,7 @@ export function DispatchPage() {
   const [showCorridors, setShowCorridors] = useState(true);
   const [showConstruction, setShowConstruction] = useState(true);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [actionErr, setActionErr] = useState<string | null>(null);
   const { data: trips, isLoading } = useQuery({
     queryKey: ["trips"],
     queryFn: async () => (await api.get("/trips/", { params: { at_risk: true, page_size: 50 } })).data,
@@ -29,11 +30,19 @@ export function DispatchPage() {
   });
   const ack = useMutation({
     mutationFn: (id: string) => api.post(`/alerts/${id}/acknowledge/`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["alerts"] });
+      setActionErr(null);
+    },
+    onError: (e) => setActionErr(errorMessage(e)),
   });
   const disrupt = useMutation({
     mutationFn: (id: string) => api.post(`/trips/${id}/disrupt/`, { minutes: 10 }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["trips"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["trips"] });
+      setActionErr(null);
+    },
+    onError: (e) => setActionErr(errorMessage(e)),
   });
   const scanHazards = useMutation({
     mutationFn: async () => (await api.post("/route-plans/scan-construction-hazards/")).data,
@@ -99,6 +108,13 @@ export function DispatchPage() {
         title="Dispatcher console"
         subtitle="At-risk trips sorted first. Start the live demo so parents and drivers see the same buses."
       />
+
+      {actionErr && (
+        <p role="alert" className="text-bad bg-red-50 rounded-xl p-3 border border-red-100 text-sm">
+          {actionErr}
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         {running ? (
           <button className="btn-danger" onClick={() => stopDemo.mutate()} disabled={stopDemo.isPending}>
@@ -218,7 +234,15 @@ export function DispatchPage() {
                 <Link className="btn-route text-xs" to={`/app/drive/${t.id}`}>
                   <Navigation size={14} /> Follow
                 </Link>
-                <button className="btn-secondary text-xs" onClick={() => disrupt.mutate(t.id)}>
+                <button
+                  className="btn-secondary text-xs"
+                  disabled={disrupt.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Add a synthetic 10-minute delay to ${t.route_code}? This is for demo/testing only.`)) {
+                      disrupt.mutate(t.id);
+                    }
+                  }}
+                >
                   <Zap size={14} /> Disrupt
                 </button>
               </div>
@@ -237,7 +261,11 @@ export function DispatchPage() {
               <div key={a.id} className="rounded-xl bg-canvas p-3 border border-navy/[0.04]">
                 <div className="flex justify-between gap-2 items-start">
                   <span className={a.severity === "critical" ? "badge-bad" : "badge-warn"}>{a.severity}</span>
-                  <button className="text-xs font-semibold text-route hover:underline" onClick={() => ack.mutate(a.id)}>
+                  <button
+                    className="text-xs font-semibold text-route hover:underline disabled:opacity-50"
+                    disabled={ack.isPending}
+                    onClick={() => ack.mutate(a.id)}
+                  >
                     Ack
                   </button>
                 </div>

@@ -4,12 +4,35 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.accounts.models import UserRole
-from apps.routing.models import BackgroundJob, Route, RoutePlan, RouteStop
+from apps.routing.models import BackgroundJob, Route, RoutePlan, RouteStop, RouteTransfer
 from apps.routing.services.optimizer import compare_plans
 from apps.routing.tasks import generate_route_plan_task
 from common.exceptions.errors import RouteWiseError
 from common.permissions.roles import HasRole
 from common.permissions.tenancy import TenantQuerySetMixin
+
+
+class RouteTransferSerializer(serializers.ModelSerializer):
+    depot_name = serializers.CharField(source="depot.name", read_only=True)
+    feeder_route_code = serializers.CharField(source="feeder_route.route_code", read_only=True)
+    trunk_route_code = serializers.CharField(source="trunk_route.route_code", read_only=True)
+
+    class Meta:
+        model = RouteTransfer
+        fields = (
+            "id",
+            "depot",
+            "depot_name",
+            "feeder_route",
+            "feeder_route_code",
+            "trunk_route",
+            "trunk_route_code",
+            "planned_arrival",
+            "planned_departure",
+            "buffer_minutes",
+            "student_count",
+            "wheelchair_count",
+        )
 
 
 class RouteStopSerializer(serializers.ModelSerializer):
@@ -39,6 +62,9 @@ class RouteSerializer(serializers.ModelSerializer):
     vehicle_number = serializers.CharField(source="assigned_vehicle.internal_number", read_only=True, default=None)
     driver_name = serializers.SerializerMethodField()
     school_name = serializers.CharField(source="school.name", read_only=True)
+    is_feeder = serializers.SerializerMethodField()
+    transfers_out = RouteTransferSerializer(many=True, read_only=True)
+    transfers_in = RouteTransferSerializer(many=True, read_only=True)
 
     class Meta:
         model = Route
@@ -66,8 +92,14 @@ class RouteSerializer(serializers.ModelSerializer):
             "safety_context",
             "student_count",
             "wheelchair_count",
+            "is_feeder",
+            "transfers_out",
+            "transfers_in",
             "stops",
         )
+
+    def get_is_feeder(self, obj):
+        return obj.transfers_out.exists()
 
     def get_driver_name(self, obj):
         if not obj.assigned_driver:
@@ -137,7 +169,13 @@ class JobSerializer(serializers.ModelSerializer):
 class RoutePlanViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = RoutePlanSerializer
     queryset = RoutePlan.objects.select_related("school", "created_by").prefetch_related(
-        "routes__stops", "routes__assigned_vehicle", "routes__assigned_driver__user"
+        "routes__stops",
+        "routes__assigned_vehicle",
+        "routes__assigned_driver__user",
+        "routes__transfers_out__depot",
+        "routes__transfers_out__trunk_route",
+        "routes__transfers_in__depot",
+        "routes__transfers_in__feeder_route",
     )
     permission_classes = [IsAuthenticated, HasRole]
     allowed_roles = (

@@ -70,6 +70,7 @@ export function DashboardPage() {
 
   if (isLoading) return <LoadingGrid count={6} />;
   if (error) return <p className="text-bad font-medium">Could not load dashboard.</p>;
+  if (!data) return <p className="text-slate">No district is assigned to your account yet.</p>;
 
   const districtName = user?.district_name || "your district";
   const kpis = [

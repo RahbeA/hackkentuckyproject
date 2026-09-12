@@ -14,7 +14,7 @@ from apps.operations.serializers import (
     TripDetailSerializer,
     TripListSerializer,
 )
-from apps.operations.services.lifecycle import broadcast_event, ingest_gps, refresh_trip_eta
+from apps.operations.services.lifecycle import broadcast_event, ingest_gps, notify_guardians_for_trip, refresh_trip_eta
 from apps.operations.services.rider_routes import boarding_for_student, guardian_route_ids, rider_claim_code
 from apps.routing.models import RouteStopStudent
 from common.exceptions.errors import RouteWiseError
@@ -27,6 +27,19 @@ STAFF = (
     UserRole.PLANNER,
     UserRole.DISPATCHER,
 )
+
+# Dispatcher-initiated guardian alerts. Accident/breakdown also log an
+# Incident (a real operational event); running-late/other are communication
+# only — being behind schedule isn't itself an incident, and the automatic
+# ML-driven delay alert (see lifecycle.maybe_raise_delay_alert) already
+# covers that case unprompted. Accident/breakdown bypass guardian
+# notification-preference muting since they're safety-critical.
+GUARDIAN_ALERT_TYPES = {
+    "accident": {"incident_type": Incident.Type.ACCIDENT, "default_severity": "critical", "title": "Accident reported", "bypass_preferences": True},
+    "breakdown": {"incident_type": Incident.Type.BREAKDOWN, "default_severity": "critical", "title": "Bus breakdown", "bypass_preferences": True},
+    "running_late": {"incident_type": None, "default_severity": "warning", "title": "Running significantly late", "bypass_preferences": False},
+    "other": {"incident_type": Incident.Type.OTHER, "default_severity": "warning", "title": "Dispatcher alert", "bypass_preferences": False},
+}
 
 
 class TripViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
@@ -213,6 +226,85 @@ class TripViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         refresh_trip_eta(trip, extra_delay_s=minutes * 60)
         broadcast_event(trip, "trip.status.updated", {"status": trip.status, "disruption": True})
         return Response(TripDetailSerializer(trip).data)
+
+    @action(detail=True, methods=["post"], url_path="alert-guardians")
+    def alert_guardians(self, request, pk=None):
+        """Dispatcher-initiated emergency alert: accident, breakdown, running very late, or other.
+
+        Creates an OperationalAlert (shows up in the dispatcher alert feed),
+        an Incident for accident/breakdown/other (real operational log entry
+        — running_late is communication-only), and a Notification for every
+        verified guardian of a student on this route.
+        """
+        trip = self.get_object()
+        if request.user.role not in STAFF:
+            raise RouteWiseError("Only dispatchers can send guardian alerts.", code="FORBIDDEN", status_code=403)
+
+        alert_type = request.data.get("alert_type")
+        spec = GUARDIAN_ALERT_TYPES.get(alert_type)
+        if not spec:
+            raise RouteWiseError(
+                f"alert_type must be one of: {', '.join(GUARDIAN_ALERT_TYPES)}.", code="INVALID_REQUEST"
+            )
+        severity = request.data.get("severity") or spec["default_severity"]
+        if severity not in {"warning", "critical"}:
+            raise RouteWiseError("severity must be 'warning' or 'critical'.", code="INVALID_REQUEST")
+
+        message = (request.data.get("message") or "").strip()
+        title = f"{spec['title']} — {trip.route.route_code}"
+        body = message or (
+            f"Dispatch has an update on your child's bus ({trip.route.route_code}). "
+            "Please check the app for details."
+        )
+
+        incident = None
+        if spec["incident_type"] is not None:
+            incident = Incident.objects.create(
+                trip=trip,
+                type=spec["incident_type"],
+                severity=Incident.Severity.CRITICAL if severity == "critical" else Incident.Severity.HIGH,
+                description=body,
+                created_by=request.user,
+            )
+
+        alert = OperationalAlert.objects.create(
+            district=trip.district,
+            trip=trip,
+            alert_type=f"manual_{alert_type}",
+            title=title,
+            message=body,
+            severity=OperationalAlert.Severity.CRITICAL if severity == "critical" else OperationalAlert.Severity.WARNING,
+        )
+
+        guardians_notified = notify_guardians_for_trip(
+            trip,
+            title=title,
+            body=body,
+            event_type="alert.guardian",
+            payload={"alert_id": str(alert.id), "trip_id": str(trip.id), "alert_type": alert_type},
+            bypass_preferences=spec["bypass_preferences"],
+        )
+
+        from apps.notifications.services import notify_roles
+
+        notify_roles(
+            trip.district,
+            ["dispatcher", "planner", "district_admin"],
+            title,
+            body,
+            "alert.created",
+            {"alert_id": str(alert.id), "trip_id": str(trip.id)},
+        )
+        broadcast_event(trip, "alert.created", {"alert_id": str(alert.id), "title": title})
+
+        return Response(
+            {
+                "alert": AlertSerializer(alert).data,
+                "incident_id": str(incident.id) if incident else None,
+                "guardians_notified": guardians_notified,
+            },
+            status=201,
+        )
 
 
 class AlertViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):

@@ -1,8 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
-  Bell,
   Bus,
   GitCompare,
   LayoutDashboard,
@@ -19,10 +17,10 @@ import {
   Waypoints,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
-import { api } from "../../api/client";
 import { ROLE_LABEL, type Role } from "../../types";
 import { Logo } from "../brand/Logo";
 import { LiveOpsProvider } from "../../live/LiveOpsProvider";
+import { NotificationBell } from "./NotificationBell";
 
 const links: { to: string; label: string; icon: typeof Map; roles?: Role[]; group: number }[] = [
   { to: "/app/live", label: "Live demo", icon: Activity, group: 0 },
@@ -48,15 +46,7 @@ export function AppShell() {
   const visible = links.filter(
     (l) => !l.roles || (user && (l.roles.includes(user.role) || user.role === "platform_admin")),
   );
-  const { data: alerts } = useQuery({
-    queryKey: ["alerts", "open-dot"],
-    queryFn: async () => (await api.get("/alerts/", { params: { is_acknowledged: false, page_size: 1 } })).data,
-    refetchInterval: 15_000,
-  });
-  const hasAlerts = (alerts?.count ?? alerts?.results?.length ?? 0) > 0;
   const isFamilyOrDriver = user?.role === "guardian" || user?.role === "driver";
-  const alertHome =
-    user?.role === "dispatcher" ? "/app/dispatch" : user?.role === "guardian" ? "/app/live" : user?.role === "driver" ? "/app/drive" : "/app/dashboard";
 
   return (
     <div className="min-h-screen flex bg-canvas text-ink">
@@ -157,17 +147,7 @@ export function AppShell() {
                 />
               </div>
             )}
-            <button
-              type="button"
-              className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-line text-slate hover:text-ink hover:bg-canvas transition-colors"
-              aria-label="Notifications"
-              onClick={() => nav(alertHome)}
-            >
-              <Bell size={17} />
-              {hasAlerts && (
-                <span className="absolute top-2 right-[9px] h-1.5 w-1.5 rounded-full bg-warn ring-[1.5px] ring-paper" />
-              )}
-            </button>
+            <NotificationBell />
           </div>
         </header>
 

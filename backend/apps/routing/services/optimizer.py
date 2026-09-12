@@ -1,4 +1,13 @@
-"""Capacitated VRP with time windows for morning school bus routes."""
+"""Capacitated VRP with time windows for morning school bus routes.
+
+Supports an optional hub-and-spoke tier: a BusStop can be flagged with
+`transfer_hub` (a Depot with `is_transfer_hub=True`). Students at such stops
+are solved as their own smaller "feeder" VRP first (yard -> feeder stops ->
+hub), and the feeder's predicted hub-arrival time becomes a hard lower bound
+on the hub stop in the main "trunk" VRP that continues to school — so the
+trunk vehicle can never be scheduled to leave before the transfer is
+physically possible. See generate_plan() and RouteTransfer.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +20,7 @@ from django.utils import timezone
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from apps.districts.models import Depot, DistrictPolicy, School
-from apps.routing.models import Route, RoutePlan, RouteStop, RouteStopStudent
+from apps.routing.models import Route, RoutePlan, RouteStop, RouteStopStudent, RouteTransfer
 from apps.routing.services.matrix import street_matrix
 from apps.transportation.models import BusStop, DriverProfile, Student, StudentStopAssignment, Vehicle
 from common.exceptions.errors import InfeasibleRouteError
@@ -39,6 +48,11 @@ def _s2t(seconds: int) -> time:
 def _policy(district) -> DistrictPolicy:
     policy, _ = DistrictPolicy.objects.get_or_create(district=district)
     return policy
+
+
+def _hub_code(hub) -> str:
+    code = "".join(ch for ch in hub.name.upper() if ch.isalnum())[:4]
+    return code or "HUB"
 
 
 def diagnose_infeasibility(school: School, students, stops_by_id, vehicles, drivers, policy) -> list[str]:
@@ -155,193 +169,300 @@ def generate_plan(plan: RoutePlan, vehicle_ids=None, driver_ids=None, weights=No
         plan.save()
         raise InfeasibleRouteError(details={"reasons": reasons})
 
-    groups: dict[str, dict[str, Any]] = {}
+    direct_assignments: list[tuple] = []
+    hub_assignments: dict[str, list] = defaultdict(list)
     for student in students:
         asg = next((a for a in student.stop_assignments.all() if a.is_active and a.direction in ("am", "both")), None)
         if asg is None or not asg.bus_stop.is_approved:
             continue
         stop = asg.bus_stop
-        g = groups.setdefault(
-            str(stop.id),
-            {"stop": stop, "students": [], "demand": 0, "wc": 0},
-        )
-        g["students"].append(student)
-        g["demand"] += 1
-        g["wc"] += 1 if student.requires_wheelchair else 0
+        if stop.transfer_hub_id:
+            hub_assignments[str(stop.transfer_hub_id)].append((student, stop))
+        else:
+            direct_assignments.append((student, stop))
 
-    if not groups:
+    if not direct_assignments and not hub_assignments:
         reasons = ["No approved stop assignment"]
         plan.status = RoutePlan.Status.FAILED
         plan.infeasibility = {"reasons": reasons}
         plan.save()
         raise InfeasibleRouteError(details={"reasons": reasons})
 
-    stop_list = list(groups.values())
-    points = [
-        (float(depot.latitude), float(depot.longitude)),
-        *[(float(g["stop"].latitude), float(g["stop"].longitude)) for g in stop_list],
-        (float(school.latitude), float(school.longitude)),
-    ]
-    hour = max(0, _t2s(school.morning_bell_time) // 3600 - 1)
-    raw = street_matrix(district, points, departure_hour=hour)
-    from apps.machine_learning.services.predict import overlay_ml_matrix
+    with transaction.atomic():
+        # Clear any previous generation's routes (feeder + trunk) up front,
+        # before either tier writes anything new, so a mid-generation failure
+        # can never leave orphaned feeder routes behind.
+        plan.routes.all().delete()
 
-    # Per-node boarding demand so the ML overlay sees real segment features
-    # instead of neutral placeholders. Load is the fleet-average proxy since
-    # assignment happens in the solver below.
-    total_demand = sum(g["demand"] for g in stop_list)
-    avg_load = total_demand / max(1, min(len(vehicles), max(1, len(stop_list))))
-    node_meta = [{"boarding": 0, "wheelchair": 0, "load": 0}]
-    node_meta += [
-        {"boarding": g["demand"], "wheelchair": g["wc"], "load": avg_load} for g in stop_list
-    ]
-    node_meta.append({"boarding": 0, "wheelchair": 0, "load": avg_load})
-    matrix = overlay_ml_matrix(raw, points, hour=hour, mode=plan.optimization_mode, node_meta=node_meta)
+        # Feeder tier: stops flagged with a transfer hub are solved as their
+        # own smaller VRP first (yard -> feeder stops -> hub). Whatever
+        # vehicles/drivers they consume come out of the shared pool before
+        # the main/trunk tier below gets the rest.
+        remaining_vehicles = list(vehicles)
+        remaining_drivers = list(drivers)
+        used_driver_ids: set = set()
+        feeder_by_hub: dict[str, dict] = {}
+        bell = _t2s(school.morning_bell_time)
+        for hub_id, pairs in hub_assignments.items():
+            hub = Depot.objects.filter(id=hub_id, district=district).first()
+            if hub is None:
+                continue
+            hub_school_km = haversine_km(hub.latitude, hub.longitude, school.latitude, school.longitude)
+            est_hub_to_school_s = (hub_school_km * 1.38 / 28) * 3600
+            buffer_s = 5 * 60
+            feeder_deadline = int(bell - policy.min_arrival_buffer_minutes * 60 - est_hub_to_school_s - buffer_s)
+            try:
+                result = _generate_feeder_routes(
+                    plan=plan,
+                    district=district,
+                    yard=depot,
+                    hub=hub,
+                    hub_students=pairs,
+                    policy=policy,
+                    vehicles=remaining_vehicles,
+                    drivers=remaining_drivers,
+                    used_driver_ids=used_driver_ids,
+                    mode=plan.optimization_mode,
+                    deadline_seconds=feeder_deadline,
+                    route_prefix=f"{school.school_code}-FEED-{_hub_code(hub)}",
+                )
+            except InfeasibleRouteError as exc:
+                reasons = (exc.details or {}).get("reasons") or [f"Could not build a feeder route into {hub.name}."]
+                plan.status = RoutePlan.Status.FAILED
+                plan.infeasibility = {"reasons": reasons}
+                plan.save()
+                raise
+            consumed_vehicle_ids = {r.assigned_vehicle_id for r in result["routes"]}
+            remaining_vehicles = [v for v in remaining_vehicles if v.id not in consumed_vehicle_ids]
+            feeder_by_hub[hub_id] = {**result, "hub": hub, "buffer_s": buffer_s}
 
-    mode = plan.optimization_mode
-    if mode == RoutePlan.Mode.FASTEST:
-        time_m = matrix["p50_s"]
-    elif mode == RoutePlan.Mode.RELIABILITY:
-        time_m = matrix["p90_s"]
-    else:
-        time_m = [
-            [int(0.55 * a + 0.45 * b) for a, b in zip(r1, r2)]
-            for r1, r2 in zip(matrix["p50_s"], matrix["p90_s"])
+        vehicles = remaining_vehicles
+        drivers = [d for d in drivers if d.id not in used_driver_ids]
+
+        groups: dict[str, dict[str, Any]] = {}
+        for student, stop in direct_assignments:
+            g = groups.setdefault(
+                str(stop.id),
+                {"stop": stop, "students": [], "demand": 0, "wc": 0, "is_transfer": False},
+            )
+            g["students"].append(student)
+            g["demand"] += 1
+            g["wc"] += 1 if student.requires_wheelchair else 0
+
+        stop_list = list(groups.values())
+        for hub_id, info in feeder_by_hub.items():
+            stop_list.append(
+                {
+                    "stop": None,
+                    "hub": info["hub"],
+                    "students": info["students"],
+                    "demand": info["demand"],
+                    "wc": info["wc"],
+                    "is_transfer": True,
+                    "earliest_arrival": info["arrival_seconds"] + info["buffer_s"],
+                    "feeder_route_ids": [r.id for r in info["routes"]],
+                }
+            )
+
+        if not stop_list:
+            reasons = ["No approved stop assignment"]
+            plan.status = RoutePlan.Status.FAILED
+            plan.infeasibility = {"reasons": reasons}
+            plan.save()
+            raise InfeasibleRouteError(details={"reasons": reasons})
+
+        def _node_point(g):
+            if g.get("is_transfer"):
+                return (float(g["hub"].latitude), float(g["hub"].longitude))
+            return (float(g["stop"].latitude), float(g["stop"].longitude))
+
+        points = [
+            (float(depot.latitude), float(depot.longitude)),
+            *[_node_point(g) for g in stop_list],
+            (float(school.latitude), float(school.longitude)),
         ]
+        hour = max(0, bell // 3600 - 1)
+        raw = street_matrix(district, points, departure_hour=hour)
+        from apps.machine_learning.services.predict import overlay_ml_matrix
 
-    n_stops = len(stop_list)
-    n_nodes = n_stops + 2
-    depot_i, school_i = 0, n_nodes - 1
-    num_vehicles = min(len(vehicles), max(1, n_stops))
-    # Wheelchair students may need accessible buses first
-    vehicles = vehicles[:num_vehicles]
-    caps = [v.capacity for v in vehicles]
-    wc_caps = [v.wheelchair_capacity for v in vehicles]
-
-    demands = [0] + [g["demand"] for g in stop_list] + [0]
-    wc_demands = [0] + [g["wc"] for g in stop_list] + [0]
-    from apps.routing.services.dwell import estimate_boarding_params
-
-    dwell = estimate_boarding_params(district)
-    service = [0] + [
-        dwell["boarding_seconds"] * g["demand"] + dwell["wheelchair_seconds"] * g["wc"]
-        for g in stop_list
-    ] + [60]
-
-    bell = _t2s(school.morning_bell_time)
-    latest_school = bell - policy.min_arrival_buffer_minutes * 60 + policy.allowable_late_minutes * 60
-    earliest_school = bell - policy.allowable_early_minutes * 60
-    max_ride = policy.max_student_ride_minutes * 60
-    horizon = bell + 3600
-
-    windows = [(0, horizon)]
-    for i in range(n_stops):
-        # Must leave enough time to reach school
-        travel_to_school = time_m[i + 1][school_i]
-        latest = latest_school - travel_to_school - service[i + 1]
-        earliest = max(0, earliest_school - max_ride)
-        if latest < earliest:
-            latest = earliest + 300
-        windows.append((int(earliest), int(max(latest, earliest + 60))))
-    windows.append((int(earliest_school), int(max(latest_school, earliest_school + 60))))
-
-    manager = pywrapcp.RoutingIndexManager(n_nodes, num_vehicles, [depot_i] * num_vehicles, [school_i] * num_vehicles)
-    routing = pywrapcp.RoutingModel(manager)
-
-    weights = weights or plan.objective_weights or {}
-    time_w = float(weights.get("time", 8 if mode == RoutePlan.Mode.FASTEST else 5))
-    dist_w = float(weights.get("distance", 3))
-    veh_w = float(weights.get("vehicles", 20 if mode != RoutePlan.Mode.FASTEST else 6))
-    ride_w = float(weights.get("ride_time", 4 if mode == RoutePlan.Mode.BALANCED else 2))
-    risk_w = float(weights.get("reliability", 12 if mode == RoutePlan.Mode.RELIABILITY else 3))
-
-    def time_cb(from_index, to_index):
-        i, j = manager.IndexToNode(from_index), manager.IndexToNode(to_index)
-        return int(time_m[i][j] + service[i])
-
-    def dist_cb(from_index, to_index):
-        i, j = manager.IndexToNode(from_index), manager.IndexToNode(to_index)
-        return int(matrix["distance_km"][i][j] * 1000)
-
-    time_idx = routing.RegisterTransitCallback(time_cb)
-    dist_idx = routing.RegisterTransitCallback(dist_cb)
-    routing.SetArcCostEvaluatorOfAllVehicles(time_idx)
-
-    routing.AddDimension(time_idx, 30 * 60, horizon, False, "Time")
-    time_dim = routing.GetDimensionOrDie("Time")
-    for node, (lo, hi) in enumerate(windows):
-        index = manager.NodeToIndex(node)
-        if node == depot_i:
-            for v in range(num_vehicles):
-                time_dim.CumulVar(routing.Start(v)).SetRange(lo, hi)
-            continue
-        if index < 0 or routing.IsEnd(index):
-            continue
-        time_dim.CumulVar(index).SetRange(lo, hi)
-    for v in range(num_vehicles):
-        time_dim.CumulVar(routing.End(v)).SetRange(windows[school_i][0], windows[school_i][1])
-        routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(routing.Start(v)))
-        routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(routing.End(v)))
-
-    def demand_cb(from_index):
-        return demands[manager.IndexToNode(from_index)]
-
-    def wc_cb(from_index):
-        return wc_demands[manager.IndexToNode(from_index)]
-
-    routing.AddDimensionWithVehicleCapacity(routing.RegisterUnaryTransitCallback(demand_cb), 0, caps, True, "Cap")
-    routing.AddDimensionWithVehicleCapacity(routing.RegisterUnaryTransitCallback(wc_cb), 0, wc_caps, True, "WC")
-
-    # Discourage unused vehicles via a large start-end cost if they only go depot->school with no stops.
-    for v in range(num_vehicles):
-        routing.SetFixedCostOfVehicle(int(veh_w * 400), v)
-
-    search = pywrapcp.DefaultRoutingSearchParameters()
-    try:
-        first = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
-        meta = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    except AttributeError:
-        first = routing_enums_pb2.FirstSolutionStrategy.Value.PATH_CHEAPEST_ARC
-        meta = routing_enums_pb2.LocalSearchMetaheuristic.Value.GUIDED_LOCAL_SEARCH
-    search.first_solution_strategy = first
-    search.local_search_metaheuristic = meta
-    search.time_limit.FromSeconds(12)
-
-    solution = routing.SolveWithParameters(search)
-    if solution is None:
-        extra = reasons or [
-            "The solver could not satisfy capacity, wheelchair, and bell-time windows together."
+        # Per-node boarding demand so the ML overlay sees real segment features
+        # instead of neutral placeholders. Load is the fleet-average proxy since
+        # assignment happens in the solver below.
+        total_demand = sum(g["demand"] for g in stop_list)
+        avg_load = total_demand / max(1, min(len(vehicles), max(1, len(stop_list))))
+        node_meta = [{"boarding": 0, "wheelchair": 0, "load": 0}]
+        node_meta += [
+            {"boarding": g["demand"], "wheelchair": g["wc"], "load": avg_load} for g in stop_list
         ]
-        if any(wc_demands) and sum(1 for v in vehicles if v.wheelchair_capacity == 0) == len(vehicles):
-            extra.append("Wheelchair capacity is insufficient.")
-        plan.status = RoutePlan.Status.FAILED
-        plan.infeasibility = {"reasons": extra}
-        plan.solver_metadata = {"status": routing.status(), "mode": mode}
-        plan.save()
-        raise InfeasibleRouteError(details={"reasons": extra})
+        node_meta.append({"boarding": 0, "wheelchair": 0, "load": avg_load})
+        matrix = overlay_ml_matrix(raw, points, hour=hour, mode=plan.optimization_mode, node_meta=node_meta)
 
-    return persist_solution(
-        plan=plan,
-        school=school,
-        depot=depot,
-        stop_list=stop_list,
-        vehicles=vehicles,
-        drivers=drivers,
-        manager=manager,
-        routing=routing,
-        solution=solution,
-        matrix=matrix,
-        time_m=time_m,
-        time_dim=time_dim,
-        policy=policy,
-        service=service,
-        mode=mode,
-        dwell=dwell,
-    )
+        mode = plan.optimization_mode
+        if mode == RoutePlan.Mode.FASTEST:
+            time_m = matrix["p50_s"]
+        elif mode == RoutePlan.Mode.RELIABILITY:
+            time_m = matrix["p90_s"]
+        else:
+            time_m = [
+                [int(0.55 * a + 0.45 * b) for a, b in zip(r1, r2)]
+                for r1, r2 in zip(matrix["p50_s"], matrix["p90_s"])
+            ]
+
+        n_stops = len(stop_list)
+        n_nodes = n_stops + 2
+        depot_i, school_i = 0, n_nodes - 1
+        num_vehicles = min(len(vehicles), max(1, n_stops))
+        # Wheelchair students may need accessible buses first
+        vehicles = vehicles[:num_vehicles]
+        caps = [v.capacity for v in vehicles]
+        wc_caps = [v.wheelchair_capacity for v in vehicles]
+
+        demands = [0] + [g["demand"] for g in stop_list] + [0]
+        wc_demands = [0] + [g["wc"] for g in stop_list] + [0]
+        from apps.routing.services.dwell import estimate_boarding_params
+
+        dwell = estimate_boarding_params(district)
+        service = [0] + [
+            dwell["boarding_seconds"] * g["demand"] + dwell["wheelchair_seconds"] * g["wc"]
+            for g in stop_list
+        ] + [60]
+
+        latest_school = bell - policy.min_arrival_buffer_minutes * 60 + policy.allowable_late_minutes * 60
+        earliest_school = bell - policy.allowable_early_minutes * 60
+        max_ride = policy.max_student_ride_minutes * 60
+        horizon = bell + 3600
+
+        windows = [(0, horizon)]
+        for i in range(n_stops):
+            g = stop_list[i]
+            # Must leave enough time to reach school
+            travel_to_school = time_m[i + 1][school_i]
+            latest = latest_school - travel_to_school - service[i + 1]
+            earliest = max(0, earliest_school - max_ride)
+            if g.get("is_transfer"):
+                # Can't depart the hub before the feeder physically arrives.
+                earliest = max(earliest, g["earliest_arrival"])
+            if latest < earliest:
+                latest = earliest + 300
+            windows.append((int(earliest), int(max(latest, earliest + 60))))
+        windows.append((int(earliest_school), int(max(latest_school, earliest_school + 60))))
+
+        manager = pywrapcp.RoutingIndexManager(n_nodes, num_vehicles, [depot_i] * num_vehicles, [school_i] * num_vehicles)
+        routing = pywrapcp.RoutingModel(manager)
+
+        weights = weights or plan.objective_weights or {}
+        time_w = float(weights.get("time", 8 if mode == RoutePlan.Mode.FASTEST else 5))
+        dist_w = float(weights.get("distance", 3))
+        veh_w = float(weights.get("vehicles", 20 if mode != RoutePlan.Mode.FASTEST else 6))
+        ride_w = float(weights.get("ride_time", 4 if mode == RoutePlan.Mode.BALANCED else 2))
+        risk_w = float(weights.get("reliability", 12 if mode == RoutePlan.Mode.RELIABILITY else 3))
+
+        def time_cb(from_index, to_index):
+            i, j = manager.IndexToNode(from_index), manager.IndexToNode(to_index)
+            return int(time_m[i][j] + service[i])
+
+        def dist_cb(from_index, to_index):
+            i, j = manager.IndexToNode(from_index), manager.IndexToNode(to_index)
+            return int(matrix["distance_km"][i][j] * 1000)
+
+        time_idx = routing.RegisterTransitCallback(time_cb)
+        dist_idx = routing.RegisterTransitCallback(dist_cb)
+        routing.SetArcCostEvaluatorOfAllVehicles(time_idx)
+
+        routing.AddDimension(time_idx, 30 * 60, horizon, False, "Time")
+        time_dim = routing.GetDimensionOrDie("Time")
+        for node, (lo, hi) in enumerate(windows):
+            index = manager.NodeToIndex(node)
+            if node == depot_i:
+                for v in range(num_vehicles):
+                    time_dim.CumulVar(routing.Start(v)).SetRange(lo, hi)
+                continue
+            if index < 0 or routing.IsEnd(index):
+                continue
+            time_dim.CumulVar(index).SetRange(lo, hi)
+        for v in range(num_vehicles):
+            time_dim.CumulVar(routing.End(v)).SetRange(windows[school_i][0], windows[school_i][1])
+            routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(routing.Start(v)))
+            routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(routing.End(v)))
+
+        def demand_cb(from_index):
+            return demands[manager.IndexToNode(from_index)]
+
+        def wc_cb(from_index):
+            return wc_demands[manager.IndexToNode(from_index)]
+
+        routing.AddDimensionWithVehicleCapacity(routing.RegisterUnaryTransitCallback(demand_cb), 0, caps, True, "Cap")
+        routing.AddDimensionWithVehicleCapacity(routing.RegisterUnaryTransitCallback(wc_cb), 0, wc_caps, True, "WC")
+
+        # Discourage unused vehicles via a large start-end cost if they only go depot->school with no stops.
+        for v in range(num_vehicles):
+            routing.SetFixedCostOfVehicle(int(veh_w * 400), v)
+
+        search = pywrapcp.DefaultRoutingSearchParameters()
+        try:
+            first = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+            meta = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+        except AttributeError:
+            first = routing_enums_pb2.FirstSolutionStrategy.Value.PATH_CHEAPEST_ARC
+            meta = routing_enums_pb2.LocalSearchMetaheuristic.Value.GUIDED_LOCAL_SEARCH
+        search.first_solution_strategy = first
+        search.local_search_metaheuristic = meta
+        search.time_limit.FromSeconds(12)
+
+        solution = routing.SolveWithParameters(search)
+        if solution is None:
+            extra = reasons or [
+                "The solver could not satisfy capacity, wheelchair, and bell-time windows together."
+            ]
+            if any(wc_demands) and sum(1 for v in vehicles if v.wheelchair_capacity == 0) == len(vehicles):
+                extra.append("Wheelchair capacity is insufficient.")
+            plan.status = RoutePlan.Status.FAILED
+            plan.infeasibility = {"reasons": extra}
+            plan.solver_metadata = {"status": routing.status(), "mode": mode}
+            plan.save()
+            raise InfeasibleRouteError(details={"reasons": extra})
+
+        plan, transfer_links = persist_solution(
+            plan=plan,
+            school=school,
+            depot=depot,
+            stop_list=stop_list,
+            vehicles=vehicles,
+            drivers=drivers,
+            manager=manager,
+            routing=routing,
+            solution=solution,
+            matrix=matrix,
+            time_m=time_m,
+            time_dim=time_dim,
+            policy=policy,
+            service=service,
+            mode=mode,
+            dwell=dwell,
+        )
+
+        for link in transfer_links:
+            info = feeder_by_hub.get(link["hub_id"])
+            if not info:
+                continue
+            for feeder_route in info["routes"]:
+                RouteTransfer.objects.update_or_create(
+                    feeder_route=feeder_route,
+                    trunk_route=link["trunk_route"],
+                    defaults={
+                        "depot": info["hub"],
+                        "planned_arrival": feeder_route.scheduled_school_arrival,
+                        "planned_departure": link["arrival_time"],
+                        "buffer_minutes": info["buffer_s"] // 60,
+                        "student_count": info["demand"],
+                        "wheelchair_count": info["wc"],
+                    },
+                )
+        return plan
 
 
 @transaction.atomic
-def persist_solution(**kwargs) -> RoutePlan:
+def persist_solution(**kwargs) -> tuple[RoutePlan, list[dict]]:
     plan: RoutePlan = kwargs["plan"]
     school = kwargs["school"]
     depot = kwargs["depot"]
@@ -360,12 +481,12 @@ def persist_solution(**kwargs) -> RoutePlan:
     dwell = kwargs.get("dwell") or {}
     risk_m = matrix.get("delay_risk") or []
 
-    plan.routes.all().delete()
     used_driver_ids = set()
     route_metrics = []
     route_n = 0
     n_stops = len(stop_list)
     school_i = n_stops + 1
+    transfer_links: list[dict] = []
 
     for v in range(len(vehicles)):
         index = routing.Start(v)
@@ -505,23 +626,45 @@ def persist_solution(**kwargs) -> RoutePlan:
             else:
                 g = stop_list[node - 1]
                 load += g["demand"]
-                rs = RouteStop.objects.create(
-                    route=route,
-                    bus_stop=g["stop"],
-                    sequence=seq,
-                    kind="stop",
-                    name=g["stop"].name,
-                    latitude=g["stop"].latitude,
-                    longitude=g["stop"].longitude,
-                    scheduled_arrival=_s2t(t),
-                    scheduled_departure=_s2t(t + service[node]),
-                    predicted_p50_arrival=_s2t(prev_t + matrix["p50_s"][prev_node][node]),
-                    predicted_p90_arrival=_s2t(prev_t + matrix["p90_s"][prev_node][node]),
-                    student_count=g["demand"],
-                    cumulative_load=load,
-                    distance_from_previous_km=matrix["distance_km"][prev_node][node],
-                    expected_seconds_from_previous=time_m[prev_node][node],
-                )
+                if g.get("is_transfer"):
+                    rs = RouteStop.objects.create(
+                        route=route,
+                        bus_stop=None,
+                        sequence=seq,
+                        kind="transfer",
+                        name=f"Transfer at {g['hub'].name}",
+                        latitude=g["hub"].latitude,
+                        longitude=g["hub"].longitude,
+                        scheduled_arrival=_s2t(t),
+                        scheduled_departure=_s2t(t + service[node]),
+                        predicted_p50_arrival=_s2t(prev_t + matrix["p50_s"][prev_node][node]),
+                        predicted_p90_arrival=_s2t(prev_t + matrix["p90_s"][prev_node][node]),
+                        student_count=g["demand"],
+                        cumulative_load=load,
+                        distance_from_previous_km=matrix["distance_km"][prev_node][node],
+                        expected_seconds_from_previous=time_m[prev_node][node],
+                    )
+                    transfer_links.append(
+                        {"hub_id": str(g["hub"].id), "trunk_route": route, "arrival_time": _s2t(t)}
+                    )
+                else:
+                    rs = RouteStop.objects.create(
+                        route=route,
+                        bus_stop=g["stop"],
+                        sequence=seq,
+                        kind="stop",
+                        name=g["stop"].name,
+                        latitude=g["stop"].latitude,
+                        longitude=g["stop"].longitude,
+                        scheduled_arrival=_s2t(t),
+                        scheduled_departure=_s2t(t + service[node]),
+                        predicted_p50_arrival=_s2t(prev_t + matrix["p50_s"][prev_node][node]),
+                        predicted_p90_arrival=_s2t(prev_t + matrix["p90_s"][prev_node][node]),
+                        student_count=g["demand"],
+                        cumulative_load=load,
+                        distance_from_previous_km=matrix["distance_km"][prev_node][node],
+                        expected_seconds_from_previous=time_m[prev_node][node],
+                    )
                 RouteStopStudent.objects.bulk_create(
                     [RouteStopStudent(route_stop=rs, student=st, action="board") for st in g["students"]]
                 )
@@ -571,7 +714,374 @@ def persist_solution(**kwargs) -> RoutePlan:
         "generated_at": timezone.now().isoformat(),
     }
     plan.save()
-    return plan
+    return plan, transfer_links
+
+
+def _generate_feeder_routes(
+    plan: RoutePlan,
+    district,
+    yard: Depot,
+    hub: Depot,
+    hub_students: list,
+    policy: DistrictPolicy,
+    vehicles: list,
+    drivers: list,
+    used_driver_ids: set,
+    mode: str,
+    deadline_seconds: int,
+    route_prefix: str,
+) -> dict:
+    """Solves a feeder-tier VRP: yard -> feeder stops -> hub (a transfer point, not the school).
+
+    Mirrors generate_plan's VRP structure but targets a hub-arrival deadline
+    instead of the school bell time. Returns {"routes": [Route,...],
+    "arrival_seconds": latest feeder arrival at the hub, "demand", "wc",
+    "students"} so the caller can inject the aggregated transfer group into
+    the main/trunk tier with a lower time-window bound.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for student, stop in hub_students:
+        g = groups.setdefault(str(stop.id), {"stop": stop, "students": [], "demand": 0, "wc": 0})
+        g["students"].append(student)
+        g["demand"] += 1
+        g["wc"] += 1 if student.requires_wheelchair else 0
+    stop_list = list(groups.values())
+
+    points = [
+        (float(yard.latitude), float(yard.longitude)),
+        *[(float(g["stop"].latitude), float(g["stop"].longitude)) for g in stop_list],
+        (float(hub.latitude), float(hub.longitude)),
+    ]
+    hour = max(0, deadline_seconds // 3600 - 1)
+    raw = street_matrix(district, points, departure_hour=hour)
+    from apps.machine_learning.services.predict import overlay_ml_matrix
+
+    total_demand = sum(g["demand"] for g in stop_list)
+    avg_load = total_demand / max(1, min(len(vehicles), max(1, len(stop_list))))
+    node_meta = [{"boarding": 0, "wheelchair": 0, "load": 0}]
+    node_meta += [{"boarding": g["demand"], "wheelchair": g["wc"], "load": avg_load} for g in stop_list]
+    node_meta.append({"boarding": 0, "wheelchair": 0, "load": avg_load})
+    matrix = overlay_ml_matrix(raw, points, hour=hour, mode=mode, node_meta=node_meta)
+
+    if mode == RoutePlan.Mode.FASTEST:
+        time_m = matrix["p50_s"]
+    elif mode == RoutePlan.Mode.RELIABILITY:
+        time_m = matrix["p90_s"]
+    else:
+        time_m = [
+            [int(0.55 * a + 0.45 * b) for a, b in zip(r1, r2)]
+            for r1, r2 in zip(matrix["p50_s"], matrix["p90_s"])
+        ]
+
+    n_stops = len(stop_list)
+    n_nodes = n_stops + 2
+    yard_i, hub_i = 0, n_nodes - 1
+    num_vehicles = min(len(vehicles), max(1, n_stops))
+    vehicles = vehicles[:num_vehicles]
+    if not vehicles:
+        raise InfeasibleRouteError(
+            details={"reasons": [f"No vehicles available for the feeder route into {hub.name}."]}
+        )
+    caps = [v.capacity for v in vehicles]
+    wc_caps = [v.wheelchair_capacity for v in vehicles]
+
+    demands = [0] + [g["demand"] for g in stop_list] + [0]
+    wc_demands = [0] + [g["wc"] for g in stop_list] + [0]
+    from apps.routing.services.dwell import estimate_boarding_params
+
+    dwell = estimate_boarding_params(district)
+    service = [0] + [
+        dwell["boarding_seconds"] * g["demand"] + dwell["wheelchair_seconds"] * g["wc"] for g in stop_list
+    ] + [60]
+
+    latest_hub = deadline_seconds
+    earliest_hub = max(0, deadline_seconds - 40 * 60)
+    max_ride = policy.max_student_ride_minutes * 60
+    horizon = deadline_seconds + 1800
+
+    windows = [(0, horizon)]
+    for i in range(n_stops):
+        travel_to_hub = time_m[i + 1][hub_i]
+        latest = latest_hub - travel_to_hub - service[i + 1]
+        earliest = max(0, earliest_hub - max_ride)
+        if latest < earliest:
+            latest = earliest + 300
+        windows.append((int(earliest), int(max(latest, earliest + 60))))
+    windows.append((int(earliest_hub), int(max(latest_hub, earliest_hub + 60))))
+
+    manager = pywrapcp.RoutingIndexManager(n_nodes, num_vehicles, [yard_i] * num_vehicles, [hub_i] * num_vehicles)
+    routing = pywrapcp.RoutingModel(manager)
+
+    weights = plan.objective_weights or {}
+    veh_w = float(weights.get("vehicles", 20 if mode != RoutePlan.Mode.FASTEST else 6))
+
+    def time_cb(from_index, to_index):
+        i, j = manager.IndexToNode(from_index), manager.IndexToNode(to_index)
+        return int(time_m[i][j] + service[i])
+
+    def dist_cb(from_index, to_index):
+        i, j = manager.IndexToNode(from_index), manager.IndexToNode(to_index)
+        return int(matrix["distance_km"][i][j] * 1000)
+
+    time_idx = routing.RegisterTransitCallback(time_cb)
+    routing.RegisterTransitCallback(dist_cb)
+    routing.SetArcCostEvaluatorOfAllVehicles(time_idx)
+    routing.AddDimension(time_idx, 30 * 60, horizon, False, "Time")
+    time_dim = routing.GetDimensionOrDie("Time")
+    for node, (lo, hi) in enumerate(windows):
+        index = manager.NodeToIndex(node)
+        if node == yard_i:
+            for v in range(num_vehicles):
+                time_dim.CumulVar(routing.Start(v)).SetRange(lo, hi)
+            continue
+        if index < 0 or routing.IsEnd(index):
+            continue
+        time_dim.CumulVar(index).SetRange(lo, hi)
+    for v in range(num_vehicles):
+        time_dim.CumulVar(routing.End(v)).SetRange(windows[hub_i][0], windows[hub_i][1])
+        routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(routing.Start(v)))
+        routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(routing.End(v)))
+
+    def demand_cb(from_index):
+        return demands[manager.IndexToNode(from_index)]
+
+    def wc_cb(from_index):
+        return wc_demands[manager.IndexToNode(from_index)]
+
+    routing.AddDimensionWithVehicleCapacity(routing.RegisterUnaryTransitCallback(demand_cb), 0, caps, True, "Cap")
+    routing.AddDimensionWithVehicleCapacity(routing.RegisterUnaryTransitCallback(wc_cb), 0, wc_caps, True, "WC")
+    for v in range(num_vehicles):
+        routing.SetFixedCostOfVehicle(int(veh_w * 400), v)
+
+    search = pywrapcp.DefaultRoutingSearchParameters()
+    try:
+        first = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+        meta = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    except AttributeError:
+        first = routing_enums_pb2.FirstSolutionStrategy.Value.PATH_CHEAPEST_ARC
+        meta = routing_enums_pb2.LocalSearchMetaheuristic.Value.GUIDED_LOCAL_SEARCH
+    search.first_solution_strategy = first
+    search.local_search_metaheuristic = meta
+    search.time_limit.FromSeconds(8)
+
+    solution = routing.SolveWithParameters(search)
+    if solution is None:
+        raise InfeasibleRouteError(details={"reasons": [f"Could not build a feeder route into {hub.name} in time."]})
+
+    return _persist_feeder_routes(
+        plan=plan,
+        hub=hub,
+        yard=yard,
+        stop_list=stop_list,
+        vehicles=vehicles,
+        drivers=drivers,
+        used_driver_ids=used_driver_ids,
+        manager=manager,
+        routing=routing,
+        solution=solution,
+        matrix=matrix,
+        time_m=time_m,
+        time_dim=time_dim,
+        service=service,
+        mode=mode,
+        policy=policy,
+        deadline_seconds=deadline_seconds,
+        route_prefix=route_prefix,
+        hub_i=hub_i,
+        n_stops=n_stops,
+    )
+
+
+def _persist_feeder_routes(
+    plan,
+    hub,
+    yard,
+    stop_list,
+    vehicles,
+    drivers,
+    used_driver_ids,
+    manager,
+    routing,
+    solution,
+    matrix,
+    time_m,
+    time_dim,
+    service,
+    mode,
+    policy,
+    deadline_seconds,
+    route_prefix,
+    hub_i,
+    n_stops,
+) -> dict:
+    routes_created = []
+    arrival_seconds = 0
+    total_demand = 0
+    total_wc = 0
+    all_students: list = []
+    route_n = 0
+
+    for v in range(len(vehicles)):
+        index = routing.Start(v)
+        seq_nodes = []
+        while not routing.IsEnd(index):
+            node = manager.IndexToNode(index)
+            t = solution.Value(time_dim.CumulVar(index))
+            seq_nodes.append((node, t))
+            index = solution.Value(routing.NextVar(index))
+        end_t = solution.Value(time_dim.CumulVar(index))
+        seq_nodes.append((hub_i, end_t))
+        pickup_nodes = [n for n, _ in seq_nodes if 1 <= n <= n_stops]
+        if not pickup_nodes:
+            continue
+        route_n += 1
+        vehicle = vehicles[v]
+        driver = None
+        for d in drivers:
+            if d.id not in used_driver_ids:
+                driver = d
+                used_driver_ids.add(d.id)
+                break
+        students = []
+        for n in pickup_nodes:
+            students.extend(stop_list[n - 1]["students"])
+        wc = sum(1 for s in students if s.requires_wheelchair)
+        dist = 0.0
+        p50 = 0
+        p90 = 0
+        route_risk = 0.0
+        prev = 0
+        for n, _ in seq_nodes[1:]:
+            dist += matrix["distance_km"][prev][n]
+            p50 += matrix["p50_s"][prev][n] + service[n]
+            p90 += matrix["p90_s"][prev][n] + service[n]
+            if matrix.get("delay_risk"):
+                route_risk = max(route_risk, float(matrix["delay_risk"][prev][n]))
+            prev = n
+        start_t = seq_nodes[0][1]
+        arrive_t = seq_nodes[-1][1]
+        ride = arrive_t - seq_nodes[1][1] if len(seq_nodes) > 1 else 0
+        slack = max(0, deadline_seconds - arrive_t)
+        on_time = round(max(0.1, min(0.97, (1 - route_risk) * (0.95 if slack > 0 else 0.5))), 3)
+        path_points = [_feeder_node_latlng(n, yard, hub, stop_list, hub_i) for n, _ in seq_nodes]
+        safety = route_safety_context(path_points)
+        risk = round(
+            min(
+                100,
+                (1 - on_time) * 80
+                + (15 if wc else 0)
+                + min(15, safety["high_injury_km"] * 6)
+                + min(16, 8 * len(safety["active_construction"])),
+            ),
+            1,
+        )
+        factors = explain_risk(mode, on_time, ride, policy, slack, wc, dist, model_risk=route_risk, safety=safety)
+        route = Route.objects.create(
+            route_plan=plan,
+            name=f"{route_prefix}-{route_n:02d}",
+            route_code=f"{route_prefix}-{route_n:02d}",
+            school=plan.school,
+            depot=yard,
+            assigned_vehicle=vehicle,
+            assigned_driver=driver,
+            direction=Route.Direction.AM,
+            scheduled_start=_s2t(start_t),
+            scheduled_school_arrival=_s2t(arrive_t),
+            total_distance_km=round(dist, 2),
+            p50_duration_seconds=int(p50),
+            p90_duration_seconds=int(p90),
+            on_time_probability=on_time,
+            risk_score=risk,
+            capacity_utilization=round(len(students) / max(vehicle.capacity, 1), 3),
+            risk_factors=factors,
+            student_count=len(students),
+            wheelchair_count=wc,
+            safety_context=safety,
+        )
+        load = 0
+        prev_node, prev_t = seq_nodes[0]
+        RouteStop.objects.create(
+            route=route,
+            bus_stop=None,
+            sequence=0,
+            kind="depot",
+            name=yard.name,
+            latitude=yard.latitude,
+            longitude=yard.longitude,
+            scheduled_departure=_s2t(start_t),
+            scheduled_arrival=_s2t(start_t),
+        )
+        seq = 1
+        for node, t in seq_nodes[1:]:
+            if node == hub_i:
+                RouteStop.objects.create(
+                    route=route,
+                    sequence=seq,
+                    kind="transfer",
+                    name=f"Transfer at {hub.name}",
+                    latitude=hub.latitude,
+                    longitude=hub.longitude,
+                    scheduled_arrival=_s2t(t),
+                    predicted_p50_arrival=_s2t(prev_t + matrix["p50_s"][prev_node][node]),
+                    predicted_p90_arrival=_s2t(prev_t + matrix["p90_s"][prev_node][node]),
+                    cumulative_load=load,
+                    student_count=0,
+                    distance_from_previous_km=matrix["distance_km"][prev_node][node],
+                    expected_seconds_from_previous=time_m[prev_node][node],
+                )
+            else:
+                g = stop_list[node - 1]
+                load += g["demand"]
+                rs = RouteStop.objects.create(
+                    route=route,
+                    bus_stop=g["stop"],
+                    sequence=seq,
+                    kind="stop",
+                    name=g["stop"].name,
+                    latitude=g["stop"].latitude,
+                    longitude=g["stop"].longitude,
+                    scheduled_arrival=_s2t(t),
+                    scheduled_departure=_s2t(t + service[node]),
+                    predicted_p50_arrival=_s2t(prev_t + matrix["p50_s"][prev_node][node]),
+                    predicted_p90_arrival=_s2t(prev_t + matrix["p90_s"][prev_node][node]),
+                    student_count=g["demand"],
+                    cumulative_load=load,
+                    distance_from_previous_km=matrix["distance_km"][prev_node][node],
+                    expected_seconds_from_previous=time_m[prev_node][node],
+                )
+                RouteStopStudent.objects.bulk_create(
+                    [RouteStopStudent(route_stop=rs, student=st, action="board") for st in g["students"]]
+                )
+            prev_node, prev_t = node, t
+            seq += 1
+
+        arrival_seconds = max(arrival_seconds, arrive_t)
+        total_demand += len(students)
+        total_wc += wc
+        all_students.extend(students)
+        routes_created.append(route)
+
+    if not routes_created:
+        raise InfeasibleRouteError(
+            details={"reasons": [f"The feeder solver into {hub.name} returned unused vehicles only."]}
+        )
+
+    return {
+        "routes": routes_created,
+        "arrival_seconds": arrival_seconds,
+        "demand": total_demand,
+        "wc": total_wc,
+        "students": all_students,
+    }
+
+
+def _feeder_node_latlng(node, yard, hub, stop_list, hub_i) -> tuple[float, float]:
+    if node == 0:
+        return (float(yard.latitude), float(yard.longitude))
+    if node == hub_i:
+        return (float(hub.latitude), float(hub.longitude))
+    stop = stop_list[node - 1]["stop"]
+    return (float(stop.latitude), float(stop.longitude))
 
 
 def _node_latlng(node, depot, school, stop_list, school_i) -> tuple[float, float]:
@@ -579,8 +1089,10 @@ def _node_latlng(node, depot, school, stop_list, school_i) -> tuple[float, float
         return (float(depot.latitude), float(depot.longitude))
     if node == school_i:
         return (float(school.latitude), float(school.longitude))
-    stop = stop_list[node - 1]["stop"]
-    return (float(stop.latitude), float(stop.longitude))
+    g = stop_list[node - 1]
+    if g.get("is_transfer"):
+        return (float(g["hub"].latitude), float(g["hub"].longitude))
+    return (float(g["stop"].latitude), float(g["stop"].longitude))
 
 
 def route_safety_context(path_points: list[tuple[float, float]]) -> dict:

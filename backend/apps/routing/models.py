@@ -104,6 +104,30 @@ class RouteStopStudent(TimeStampedUUIDModel):
     action = models.CharField(max_length=12, choices=Action.choices, default=Action.BOARD)
 
 
+class RouteTransfer(TimeStampedUUIDModel):
+    """Links a feeder route (ends at a transfer hub) to the trunk route that continues from there.
+
+    Both routes are produced by the same generate_plan() call: the feeder
+    tier is solved first, targeting an arrival deadline at the hub; its
+    result then becomes a hard lower time-window bound on the hub stop in
+    the trunk tier, so the trunk vehicle can't be scheduled to leave before
+    the transfer is physically possible.
+    """
+
+    depot = models.ForeignKey("districts.Depot", on_delete=models.CASCADE, related_name="transfers")
+    feeder_route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name="transfers_out")
+    trunk_route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name="transfers_in")
+    planned_arrival = models.TimeField(help_text="Feeder route's predicted arrival at the hub.")
+    planned_departure = models.TimeField(help_text="Trunk route's scheduled time at the hub stop.")
+    buffer_minutes = models.PositiveIntegerField(default=5)
+    student_count = models.PositiveIntegerField(default=0)
+    wheelchair_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("feeder_route", "trunk_route")
+        ordering = ["planned_arrival"]
+
+
 class TravelMatrixCache(TenantModel):
     cache_key = models.CharField(max_length=128)
     provider = models.CharField(max_length=40)

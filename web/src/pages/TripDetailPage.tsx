@@ -2,13 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Construction, Navigation, ShieldCheck } from "lucide-react";
-import { api } from "../api/client";
+import { AlertOctagon, CarFront, ClockAlert, Construction, Loader2, Navigation, Send, ShieldCheck, Wrench } from "lucide-react";
+import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { RouteMap } from "../components/maps/RouteMap";
 import { LoadingBlock } from "../components/ui/LoadingBlock";
 import { RiskFactorList, SAFETY_FACTOR_CODES } from "../components/ui/RiskFactorList";
 import { useHazardLayers } from "../hooks/useHazardLayers";
+
+const ALERT_TYPES = [
+  { value: "accident", label: "Accident", icon: CarFront, defaultSeverity: "critical" },
+  { value: "breakdown", label: "Bus breakdown", icon: Wrench, defaultSeverity: "critical" },
+  { value: "running_late", label: "Running very late", icon: ClockAlert, defaultSeverity: "warning" },
+  { value: "other", label: "Other emergency", icon: AlertOctagon, defaultSeverity: "warning" },
+] as const;
 
 export function TripDetailPage() {
   const { id } = useParams();
@@ -17,14 +24,37 @@ export function TripDetailPage() {
   const qc = useQueryClient();
   const [showCorridors, setShowCorridors] = useState(true);
   const [showConstruction, setShowConstruction] = useState(true);
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertType, setAlertType] = useState<(typeof ALERT_TYPES)[number]["value"]>("accident");
+  const [severity, setSeverity] = useState<"warning" | "critical">("critical");
+  const [message, setMessage] = useState("");
+  const [alertErr, setAlertErr] = useState<string | null>(null);
+  const [alertOk, setAlertOk] = useState<string | null>(null);
   const { data: trip } = useQuery({
     queryKey: ["trip", id],
     queryFn: async () => (await api.get(`/trips/${id}/`)).data,
     refetchInterval: 3000,
   });
-  const incident = useMutation({
-    mutationFn: () => api.post("/incidents/", { trip: id, type: "traffic", severity: "medium", description: "Dispatcher-noted delay (demo)." }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["trip", id] }),
+  const sendAlert = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post(`/trips/${id}/alert-guardians/`, {
+          alert_type: alertType,
+          severity,
+          message: message.trim(),
+        })
+      ).data,
+    onSuccess: (data) => {
+      setAlertOpen(false);
+      setMessage("");
+      setAlertErr(null);
+      setAlertOk(
+        `Sent to ${data.guardians_notified} guardian${data.guardians_notified === 1 ? "" : "s"}` +
+          (data.incident_id ? " and logged as an incident." : "."),
+      );
+      qc.invalidateQueries({ queryKey: ["trip", id] });
+    },
+    onError: (e) => setAlertErr(errorMessage(e)),
   });
   const stopPoints = (trip?.stops || []).map((s: { latitude: string; longitude: string }) => ({
     lat: Number(s.latitude),
@@ -147,10 +177,126 @@ export function TripDetailPage() {
       </div>
 
       <p className="card card-body text-sm text-slate leading-relaxed">{trip.ml_explanation}</p>
+
+      {alertOk && (
+        <p className="text-good bg-emerald-50 rounded-xl p-3 border border-emerald-100 text-sm">{alertOk}</p>
+      )}
+
       {!isGuardian && (
-        <button className="btn-secondary" onClick={() => incident.mutate()}>
-          Create incident
-        </button>
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="section-title !mb-0">Emergency alerts</h2>
+            <button className="btn-danger" onClick={() => setAlertOpen(true)}>
+              <Send size={15} /> Report emergency
+            </button>
+          </div>
+          {(trip.alerts || []).length === 0 ? (
+            <p className="text-slate text-sm">No alerts sent for this trip.</p>
+          ) : (
+            <div className="space-y-2">
+              {trip.alerts.map((a: { id: string; title: string; message: string; severity: string; created_at: string }) => (
+                <div key={a.id} className="card card-body flex items-start gap-3">
+                  <span className={a.severity === "critical" ? "badge-bad" : a.severity === "warning" ? "badge-warn" : "badge-neutral"}>
+                    {a.severity}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-sm">{a.title}</div>
+                    <p className="text-xs text-slate mt-0.5">{a.message}</p>
+                    <p className="text-[11px] text-muted mt-1">{new Date(a.created_at).toLocaleString()}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {alertOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal>
+          <form
+            className="modal-panel"
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendAlert.mutate();
+            }}
+          >
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Send size={18} className="text-bad" /> Report emergency
+            </h2>
+            <p className="text-sm text-slate">
+              Notifies every verified guardian of a student on {trip.route_code} right now.
+            </p>
+            {alertErr && <p className="text-bad text-sm bg-red-50 rounded-xl p-3">{alertErr}</p>}
+
+            <div className="grid gap-1.5">
+              <span className="label">What happened?</span>
+              <div className="grid grid-cols-2 gap-2">
+                {ALERT_TYPES.map((t) => {
+                  const Icon = t.icon;
+                  const active = alertType === t.value;
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
+                        active ? "border-route bg-accent-soft text-route" : "border-slate/15 text-slate hover:border-route/30"
+                      }`}
+                      onClick={() => {
+                        setAlertType(t.value);
+                        setSeverity(t.defaultSeverity);
+                      }}
+                    >
+                      <Icon size={15} /> {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="label" htmlFor="alert-severity">
+                Severity
+              </label>
+              <select
+                id="alert-severity"
+                className="select"
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as "warning" | "critical")}
+              >
+                <option value="warning">Warning</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="label" htmlFor="alert-message">
+                Message to guardians (optional)
+              </label>
+              <textarea
+                id="alert-message"
+                className="input min-h-24"
+                placeholder="e.g. Minor collision at 3rd &amp; Main, everyone is safe, a replacement bus is 15 minutes out."
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+              />
+              <p className="text-xs text-muted mt-1">
+                {alertType === "accident" || alertType === "breakdown"
+                  ? "Accident and breakdown alerts always reach guardians, even if they've muted delay notifications."
+                  : "Guardians who've muted this alert type won't be notified."}
+              </p>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button type="button" className="btn-secondary" onClick={() => setAlertOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn-danger" disabled={sendAlert.isPending}>
+                {sendAlert.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                Send alert
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );

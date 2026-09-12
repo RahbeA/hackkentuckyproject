@@ -79,6 +79,45 @@ class BusStopViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(district=self.request.user.district)
 
+    def _school_or_404(self, school_id):
+        from apps.districts.models import School
+
+        school = School.objects.filter(id=school_id).select_related("district").first()
+        user = self.request.user
+        if not school or (user.role != UserRole.PLATFORM_ADMIN and str(school.district_id) != str(user.district_id)):
+            raise RouteWiseError("School not found.", code="NOT_FOUND", status_code=404)
+        return school
+
+    @action(detail=False, methods=["post"], url_path="suggest")
+    def suggest(self, request):
+        """Preview walk-radius-constrained stop clusters for a school's students. Read-only."""
+        from apps.transportation.services.stop_optimizer import suggest_stops
+
+        school_id = request.data.get("school")
+        if not school_id:
+            raise RouteWiseError("school is required.", code="INVALID_REQUEST")
+        school = self._school_or_404(school_id)
+        result = suggest_stops(
+            school,
+            direction=request.data.get("direction", "am"),
+            max_students_per_stop=int(request.data.get("max_students_per_stop", 12)),
+            only_unassigned=bool(request.data.get("only_unassigned", True)),
+        )
+        return Response(result)
+
+    @action(detail=False, methods=["post"], url_path="commit-suggestions")
+    def commit_suggestions(self, request):
+        """Creates real BusStop + StudentStopAssignment rows from a (possibly edited) suggestion preview."""
+        from apps.transportation.services.stop_optimizer import commit_suggested_stops
+
+        school_id = request.data.get("school")
+        suggestions = request.data.get("suggestions") or []
+        if not school_id or not suggestions:
+            raise RouteWiseError("school and suggestions are required.", code="INVALID_REQUEST")
+        school = self._school_or_404(school_id)
+        created = commit_suggested_stops(school, suggestions, direction=request.data.get("direction", "am"))
+        return Response(BusStopSerializer(created, many=True).data, status=201)
+
 
 class AssignmentViewSet(viewsets.ModelViewSet):
     serializer_class = StudentStopAssignmentSerializer

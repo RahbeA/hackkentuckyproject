@@ -55,6 +55,23 @@ export function StudentsPage() {
       </div>
       {isLoading ? (
         <LoadingBlock rows={6} />
+      ) : rows.length === 0 ? (
+        <div className="card card-body text-center text-slate">
+          {q || grade ? (
+            <p>No students match your search.</p>
+          ) : (
+            <>
+              <p className="font-semibold text-ink">No students yet</p>
+              <p className="text-sm mt-1">
+                Import your roster from{" "}
+                <Link className="link" to="/app/onboarding">
+                  District onboarding
+                </Link>
+                .
+              </p>
+            </>
+          )}
+        </div>
       ) : (
         <div className="data-table-wrap">
           <table className="data-table">
@@ -93,7 +110,7 @@ export function StudentsPage() {
           </table>
         </div>
       )}
-      <Pager count={data?.count} page={page} pageSize={50} onPage={setPage} />
+      {rows.length > 0 && <Pager count={data?.count} page={page} pageSize={50} onPage={setPage} />}
     </div>
   );
 }

@@ -92,6 +92,8 @@ class GuardianChildSerializer(serializers.ModelSerializer):
 
 
 class BusStopSerializer(serializers.ModelSerializer):
+    transfer_hub_name = serializers.CharField(source="transfer_hub.name", read_only=True, default=None)
+
     class Meta:
         model = BusStop
         fields = (
@@ -106,6 +108,8 @@ class BusStopSerializer(serializers.ModelSerializer):
             "accessibility",
             "safety_notes",
             "safety_flags",
+            "transfer_hub",
+            "transfer_hub_name",
         )
         read_only_fields = ("id", "district", "safety_flags")
 

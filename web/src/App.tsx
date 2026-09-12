@@ -26,6 +26,9 @@ import { LivePage } from "./pages/LivePage";
 import { PrivacyPage } from "./pages/PrivacyPage";
 import type { Role } from "./types";
 
+const STAFF_ROLES: Role[] = ["platform_admin", "district_admin", "planner", "dispatcher"];
+const PLANNING_ROLES: Role[] = ["platform_admin", "district_admin", "planner"];
+
 function Guard({ children, roles }: { children: ReactNode; roles?: Role[] }) {
   const { user, loading } = useAuth();
   if (loading) {
@@ -71,21 +74,105 @@ export function App() {
         <Route index element={<Navigate to="/app/dashboard" replace />} />
         <Route path="live" element={<LivePage />} />
         <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="schools" element={<SchoolsPage />} />
-        <Route path="schools/:id" element={<SchoolDetailPage />} />
-        <Route path="students" element={<StudentsPage />} />
-        <Route path="students/:id" element={<StudentDetailPage />} />
-        <Route path="fleet" element={<FleetPage />} />
-        <Route path="drivers" element={<DriversPage />} />
-        <Route path="onboarding" element={<OnboardingPage />} />
-        <Route path="planner" element={<PlannerPage />} />
-        <Route path="compare" element={<ComparePage />} />
-        <Route path="twin" element={<TwinPage />} />
-        <Route path="dispatch" element={<DispatchPage />} />
+        <Route
+          path="schools"
+          element={
+            <Guard roles={STAFF_ROLES}>
+              <SchoolsPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="schools/:id"
+          element={
+            <Guard roles={STAFF_ROLES}>
+              <SchoolDetailPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="students"
+          element={
+            <Guard roles={STAFF_ROLES}>
+              <StudentsPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="students/:id"
+          element={
+            <Guard roles={STAFF_ROLES}>
+              <StudentDetailPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="fleet"
+          element={
+            <Guard roles={STAFF_ROLES}>
+              <FleetPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="drivers"
+          element={
+            <Guard roles={STAFF_ROLES}>
+              <DriversPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="onboarding"
+          element={
+            <Guard roles={PLANNING_ROLES}>
+              <OnboardingPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="planner"
+          element={
+            <Guard roles={PLANNING_ROLES}>
+              <PlannerPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="compare"
+          element={
+            <Guard roles={PLANNING_ROLES}>
+              <ComparePage />
+            </Guard>
+          }
+        />
+        <Route
+          path="twin"
+          element={
+            <Guard roles={PLANNING_ROLES}>
+              <TwinPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="dispatch"
+          element={
+            <Guard roles={["platform_admin", "district_admin", "dispatcher"]}>
+              <DispatchPage />
+            </Guard>
+          }
+        />
         <Route path="drive" element={<DrivePage />} />
         <Route path="drive/:id" element={<DrivePage />} />
         <Route path="trips/:id" element={<TripDetailPage />} />
-        <Route path="admin" element={<AdminPage />} />
+        <Route
+          path="admin"
+          element={
+            <Guard roles={["platform_admin", "district_admin"]}>
+              <AdminPage />
+            </Guard>
+          }
+        />
       </Route>
 
       {/* Unknown paths fall back to the landing page */}

@@ -75,5 +75,6 @@ class DepotSerializer(serializers.ModelSerializer):
             "opens_at",
             "closes_at",
             "is_active",
+            "is_transfer_hub",
         )
         read_only_fields = ("id", "district")

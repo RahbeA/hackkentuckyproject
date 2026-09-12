@@ -1,8 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bus, Users } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { LoadingBlock } from "../components/ui/LoadingBlock";
 import { PageHeader } from "../components/ui/PageHeader";
+
+function EmptyRoster({ label }: { label: string }) {
+  return (
+    <div className="card card-body text-center text-slate">
+      <p className="font-semibold text-ink">No {label} yet</p>
+      <p className="text-sm mt-1">
+        Import your roster from{" "}
+        <Link className="link" to="/app/onboarding">
+          District onboarding
+        </Link>
+        .
+      </p>
+    </div>
+  );
+}
 
 export function FleetPage() {
   const { data, isLoading } = useQuery({
@@ -15,6 +31,8 @@ export function FleetPage() {
       <PageHeader title="Fleet" subtitle="Buses, capacity, and depot assignments for the demo district." />
       {isLoading ? (
         <LoadingBlock rows={4} />
+      ) : rows.length === 0 ? (
+        <EmptyRoster label="vehicles" />
       ) : (
         <div className="grid md:grid-cols-2 gap-4">
           {rows.map((v: { id: string; internal_number: string; capacity: number; wheelchair_capacity: number; status: string; vehicle_type: string; depot_name?: string }) => (
@@ -54,6 +72,8 @@ export function DriversPage() {
       <PageHeader title="Drivers" subtitle="Licensed operators with endorsements and assignment status." />
       {isLoading ? (
         <LoadingBlock rows={5} />
+      ) : rows.length === 0 ? (
+        <EmptyRoster label="drivers" />
       ) : (
         <div className="data-table-wrap">
           <table className="data-table">

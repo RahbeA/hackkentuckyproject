@@ -106,3 +106,38 @@ export interface ConstructionPermit {
   longitude: number;
   is_active: boolean;
 }
+
+export interface SuggestedStopStudent {
+  student_id: string;
+  name: string;
+  walk_distance_m: number;
+  requires_wheelchair: boolean;
+}
+
+export interface SafetyFlags {
+  on_high_injury_corridor: boolean;
+  high_injury_corridor_name: string | null;
+  has_marked_crossing_or_signal: boolean;
+}
+
+export interface SuggestedStop {
+  temp_id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  students: SuggestedStopStudent[];
+  student_count: number;
+  wheelchair_count: number;
+  max_walk_distance_m: number;
+  avg_walk_distance_m: number;
+  safety_flags: SafetyFlags;
+}
+
+export interface SuggestStopsResponse {
+  school_id: string;
+  direction: string;
+  max_walk_distance_m: number;
+  students_considered: number;
+  skipped_students: { student_id: string; name: string; reason: string }[];
+  suggested_stops: SuggestedStop[];
+}
