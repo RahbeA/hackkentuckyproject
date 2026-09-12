@@ -16,14 +16,23 @@ def boarding_for_student(student):
     Prefers an explicit RouteStopStudent board assignment, then a stop
     assignment from import, then any route serving the student's school.
     """
+    from django.utils import timezone
+
     from apps.routing.models import Route, RouteStop, RouteStopStudent
     from apps.transportation.models import StudentStopAssignment
 
-    rss = (
+    today = timezone.localdate()
+    board_qs = (
         RouteStopStudent.objects.filter(student=student, action=RouteStopStudent.Action.BOARD)
+        .exclude(route_stop__route__route_plan__status__in=("archived", "failed"))
         .select_related("route_stop__route__school")
-        .first()
+        # A student can carry BOARD rows from several regenerated plans. Prefer
+        # the route that is actually running today (what the live map / demo
+        # animates) so the parent's pin matches the moving bus, then fall back
+        # to the most recently updated plan.
+        .order_by("-route_stop__route__route_plan__updated_at")
     )
+    rss = board_qs.filter(route_stop__route__trips__service_date=today).first() or board_qs.first()
     if rss:
         return rss.route_stop, rss.route_stop.route
 
@@ -57,7 +66,7 @@ def boarding_for_student(student):
             return rs, rs.route
 
     if student.school_id:
-        route = (
+        school_routes = (
             Route.objects.filter(
                 school_id=student.school_id,
                 route_plan__district=student.district,
@@ -65,7 +74,10 @@ def boarding_for_student(student):
             .exclude(route_plan__status__in=("archived", "failed"))
             .order_by("-route_plan__updated_at", "route_code")
             .select_related("school")
-            .first()
+        )
+        route = (
+            school_routes.filter(trips__service_date=timezone.localdate()).first()
+            or school_routes.first()
         )
         if route:
             rs = (
